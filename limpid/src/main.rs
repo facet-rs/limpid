@@ -95,6 +95,42 @@ fn remove_worktree(
     Ok(())
 }
 
+/// Create a comparison workspace with both facet and limpid worktrees
+fn create_comparison_workspace(
+    facet_repo: &Utf8PathBuf,
+    limpid_repo: &Utf8PathBuf,
+    workspace_dir: &Utf8PathBuf,
+) -> Result<(Utf8PathBuf, Utf8PathBuf), Box<dyn std::error::Error>> {
+    println!("\n{} Creating comparison workspace...", "🏗️ ".bright_blue());
+    
+    // Create the workspace directory
+    std::fs::create_dir_all(workspace_dir)?;
+    println!("  {} Created workspace at {}", "✅".green(), workspace_dir.bright_blue());
+    
+    // Create facet worktree at main branch
+    let facet_worktree = workspace_dir.join("facet");
+    println!("\n  {} Creating facet worktree at main branch...", "1️⃣ ".bright_black());
+    create_worktree(facet_repo, &facet_worktree, "main")?;
+    
+    // Get current HEAD of limpid for the worktree
+    let mut cmd = Command::new("git");
+    cmd.args(["rev-parse", "HEAD"])
+        .current_dir(limpid_repo);
+    let output = run_command(&mut cmd)?;
+    let limpid_head = std::str::from_utf8(&output.stdout)?.trim();
+    
+    // Create limpid worktree at current HEAD
+    let limpid_worktree = workspace_dir.join("limpid");
+    println!("\n  {} Creating limpid worktree at HEAD ({})...", "2️⃣ ".bright_black(), &limpid_head[..8].yellow());
+    create_worktree(limpid_repo, &limpid_worktree, limpid_head)?;
+    
+    println!("\n  {} Workspace created successfully!", "🎉".bright_green());
+    println!("    {} Facet:  {}", "•".bright_black(), facet_worktree.bright_blue());
+    println!("    {} Limpid: {}", "•".bright_black(), limpid_worktree.bright_blue());
+    
+    Ok((facet_worktree, limpid_worktree))
+}
+
 /// Format bytes into human-readable units
 fn format_bytes(bytes: u64) -> String {
     const KIB: u64 = 1024;
