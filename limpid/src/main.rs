@@ -11,11 +11,18 @@ use substance::{
 fn run_command(cmd: &mut Command) -> Result<Output, Box<dyn std::error::Error>> {
     // Build the command string for display
     let program = cmd.get_program().to_string_lossy();
-    let args: Vec<String> = cmd.get_args().map(|s| s.to_string_lossy().to_string()).collect();
+    let args: Vec<String> = cmd
+        .get_args()
+        .map(|s| s.to_string_lossy().to_string())
+        .collect();
     let full_command = format!("{} {}", program, args.join(" "));
-    
-    println!("{} {}", "🔧 Running:".bright_black(), full_command.bright_blue());
-    
+
+    println!(
+        "{} {}",
+        "🔧 Running:".bright_black(),
+        full_command.bright_blue()
+    );
+
     let output = cmd.output()?;
     Ok(output)
 }
@@ -52,7 +59,7 @@ fn create_worktree(
         branch,
     ])
     .current_dir(repo_path);
-    
+
     let output = run_command(&mut cmd)?;
 
     if !output.status.success() {
@@ -80,9 +87,8 @@ fn remove_worktree(
 
     // Run git worktree prune to clean up
     let mut cmd = Command::new("git");
-    cmd.args(["worktree", "prune"])
-        .current_dir(repo_path);
-    
+    cmd.args(["worktree", "prune"]).current_dir(repo_path);
+
     let output = run_command(&mut cmd)?;
 
     if !output.status.success() {
@@ -102,32 +108,53 @@ fn create_comparison_workspace(
     workspace_dir: &Utf8PathBuf,
 ) -> Result<(Utf8PathBuf, Utf8PathBuf), Box<dyn std::error::Error>> {
     println!("\n{} Creating comparison workspace...", "🏗️ ".bright_blue());
-    
+
     // Create the workspace directory
     std::fs::create_dir_all(workspace_dir)?;
-    println!("  {} Created workspace at {}", "✅".green(), workspace_dir.bright_blue());
-    
+    println!(
+        "  {} Created workspace at {}",
+        "✅".green(),
+        workspace_dir.bright_blue()
+    );
+
     // Create facet worktree at main branch
     let facet_worktree = workspace_dir.join("facet");
-    println!("\n  {} Creating facet worktree at main branch...", "1️⃣ ".bright_black());
+    println!(
+        "\n  {} Creating facet worktree at main branch...",
+        "1️⃣ ".bright_black()
+    );
     create_worktree(facet_repo, &facet_worktree, "main")?;
-    
+
     // Get current HEAD of limpid for the worktree
     let mut cmd = Command::new("git");
-    cmd.args(["rev-parse", "HEAD"])
-        .current_dir(limpid_repo);
+    cmd.args(["rev-parse", "HEAD"]).current_dir(limpid_repo);
     let output = run_command(&mut cmd)?;
     let limpid_head = std::str::from_utf8(&output.stdout)?.trim();
-    
+
     // Create limpid worktree at current HEAD
     let limpid_worktree = workspace_dir.join("limpid");
-    println!("\n  {} Creating limpid worktree at HEAD ({})...", "2️⃣ ".bright_black(), &limpid_head[..8].yellow());
+    println!(
+        "\n  {} Creating limpid worktree at HEAD ({})...",
+        "2️⃣ ".bright_black(),
+        &(limpid_head[..8]).yellow()
+    );
     create_worktree(limpid_repo, &limpid_worktree, limpid_head)?;
-    
-    println!("\n  {} Workspace created successfully!", "🎉".bright_green());
-    println!("    {} Facet:  {}", "•".bright_black(), facet_worktree.bright_blue());
-    println!("    {} Limpid: {}", "•".bright_black(), limpid_worktree.bright_blue());
-    
+
+    println!(
+        "\n  {} Workspace created successfully!",
+        "🎉".bright_green()
+    );
+    println!(
+        "    {} Facet:  {}",
+        "•".bright_black(),
+        facet_worktree.bright_blue()
+    );
+    println!(
+        "    {} Limpid: {}",
+        "•".bright_black(),
+        limpid_worktree.bright_blue()
+    );
+
     Ok((facet_worktree, limpid_worktree))
 }
 
@@ -166,7 +193,7 @@ fn format_size_diff(diff: i64) -> String {
 fn get_default_target() -> Result<String, Box<dyn std::error::Error>> {
     let mut cmd = Command::new("rustc");
     cmd.args(["--print", "target-libdir"]);
-    
+
     let output = run_command(&mut cmd)?;
 
     let path = std::str::from_utf8(&output.stdout)?.trim();
@@ -188,7 +215,7 @@ fn find_git_root(start_path: &Utf8Path) -> Result<Utf8PathBuf, Box<dyn std::erro
     let mut cmd = Command::new("git");
     cmd.args(["rev-parse", "--show-toplevel"])
         .current_dir(start_path);
-    
+
     let output = run_command(&mut cmd)?;
 
     if !output.status.success() {
@@ -452,9 +479,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Get current commit hash
         let mut cmd = Command::new("git");
-        cmd.args(["rev-parse", "HEAD"])
-            .current_dir(&facet_root);
-        
+        cmd.args(["rev-parse", "HEAD"]).current_dir(&facet_root);
+
         let current_commit = run_command(&mut cmd)?;
         let current_hash = std::str::from_utf8(&current_commit.stdout)?.trim();
         println!(
@@ -464,12 +490,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             current_hash.bright_black()
         );
 
-        // Create worktree for main branch
-        let worktree_path = temp_dir.join(format!("facet-main-{}", std::process::id()));
-        create_worktree(&facet_root, &worktree_path, "main")?;
+        // Create comparison workspace with both worktrees
+        let workspace_dir = temp_dir.join(format!("limpid-main-workspace-{}", std::process::id()));
+        let (facet_worktree, limpid_worktree) =
+            create_comparison_workspace(&facet_root, &limpid_root, &workspace_dir)?;
 
-        // Build ks-facet from main branch
-        let main_ks_facet_manifest = worktree_path.join("limpid/kitchensink/ks-facet/Cargo.toml");
+        // Build ks-facet from main branch worktree
+        let main_ks_facet_manifest = limpid_worktree.join("kitchensink/ks-facet/Cargo.toml");
         if main_ks_facet_manifest.exists() {
             let main_target_dir =
                 temp_dir.join(format!("limpid-ks-facet-main-{}", std::process::id()));
@@ -649,8 +676,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::fs::remove_dir_all(&main_target_dir)?;
             }
 
-            // Remove worktree
-            remove_worktree(&facet_root, &worktree_path)?;
+            // Clean up workspace (both worktrees)
+            println!("\n{} Cleaning up workspace...", "🧹".bright_black());
+            if workspace_dir.exists() {
+                std::fs::remove_dir_all(&workspace_dir)?;
+            }
+            remove_worktree(&facet_root, &facet_worktree)?;
+            remove_worktree(&limpid_root, &limpid_worktree)?;
         } else {
             println!(
                 "⚠️  {} ks-facet not found in main branch",
