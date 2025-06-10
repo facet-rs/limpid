@@ -1,0 +1,22 @@
+[workspace]
+members = [
+    "ks-debug",
+    "ks-facet-json-read",
+    "ks-facet-json-write",
+    "ks-facet-pretty",
+    "ks-facet",
+    "ks-mock",
+    "ks-serde-json-read",
+    "ks-serde-json-write",
+    "ks-serde",
+    "ks-types",
+]
+resolver = "3"
+
+[workspace.dependencies]
+facet-core = { path = "../../facet/facet-core" }
+facet-json = { path = "../../facet/facet-json" }
+facet-reflect = { path = "../../facet/facet-reflect" }
+facet-toml = { path = "../../facet/facet-toml" }
+facet-pretty = { path = "../../facet/facet-pretty" }
+facet = { path = "../../facet/facet" }

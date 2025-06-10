@@ -136,7 +136,7 @@ fn create_comparison_workspace(
     println!(
         "\n  {} Creating limpid worktree at HEAD ({})...",
         "2️⃣ ".bright_black(),
-        &(limpid_head[..8]).yellow()
+        (&limpid_head[..8]).yellow()
     );
     create_worktree(limpid_repo, &limpid_worktree, limpid_head)?;
 

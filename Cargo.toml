@@ -1,23 +1,6 @@
 [workspace]
-members = [
-    "kitchensink/ks-debug",
-    "kitchensink/ks-facet-json-read",
-    "kitchensink/ks-facet-json-write",
-    "kitchensink/ks-facet-pretty",
-    "kitchensink/ks-facet",
-    "kitchensink/ks-mock",
-    "kitchensink/ks-serde-json-read",
-    "kitchensink/ks-serde-json-write",
-    "kitchensink/ks-serde",
-    "kitchensink/ks-types",
-    "limpid",
-]
+members = ["limpid"]
+exclude = ["kitchensink"]
 resolver = "3"
 
 [workspace.dependencies]
-facet-core = { path = "../facet/facet-core" }
-facet-json = { path = "../facet/facet-json" }
-facet-reflect = { path = "../facet/facet-reflect" }
-facet-toml = { path = "../facet/facet-toml" }
-facet-pretty = { path = "../facet/facet-pretty" }
-facet = { path = "../facet/facet" }
