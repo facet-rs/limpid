@@ -1,0 +1,10 @@
+[package]
+name = "limpid"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "limpid"
+path = "src/main.rs"
+
+[dependencies]
