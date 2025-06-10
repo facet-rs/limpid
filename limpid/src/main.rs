@@ -189,6 +189,20 @@ fn format_size_diff(diff: i64) -> String {
     }
 }
 
+/// Format size difference for markdown (no colors)
+fn format_size_diff_md(diff: i64) -> String {
+    let abs_diff = diff.abs();
+    let formatted = format_bytes(abs_diff.try_into().unwrap_or_default());
+
+    if diff > 0 {
+        format!("+{}", formatted)
+    } else if diff < 0 {
+        format!("-{}", formatted)
+    } else {
+        "no change".to_string()
+    }
+}
+
 /// Get the default target triple from rustc
 fn get_default_target() -> Result<String, Box<dyn std::error::Error>> {
     let mut cmd = Command::new("rustc");
@@ -235,6 +249,15 @@ struct BuildAnalysisResult {
     analysis: substance::AnalysisResult,
     timing_data: Vec<substance::TimingInfo>,
     wall_time: std::time::Duration,
+}
+
+/// Complete comparison report data
+struct ComparisonReport {
+    current_hash: String,
+    main_result: BuildAnalysisResult,
+    current_result: BuildAnalysisResult,
+    comparison: substance::AnalysisComparison,
+    crate_time_changes: Vec<(String, Option<f64>, Option<f64>)>,
 }
 
 /// Build and analyze a specific version of ks-facet
@@ -350,8 +373,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     env_logger::init();
 
-    println!("{}", "🌊 Limpid - Binary Size Analyzer".blue().bold());
-    println!("{}", "─".repeat(40).bright_black());
+    // Check for --markdown flag
+    let args: Vec<String> = std::env::args().collect();
+    let markdown_mode = args.iter().any(|arg| arg == "--markdown" || arg == "-m");
+
+    if !markdown_mode {
+        println!("{}", "🌊 Limpid - Binary Size Analyzer".blue().bold());
+        println!("{}", "─".repeat(40).bright_black());
+    }
 
     // Get current directory
     let current_dir = Utf8PathBuf::from_path_buf(std::env::current_dir()?)
