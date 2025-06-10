@@ -43,16 +43,17 @@ fn create_worktree(
     );
 
     // Create the worktree
-    let output = Command::new("git")
-        .args([
-            "worktree",
-            "add",
-            "--detach",
-            worktree_path.as_str(),
-            branch,
-        ])
-        .current_dir(repo_path)
-        .output()?;
+    let mut cmd = Command::new("git");
+    cmd.args([
+        "worktree",
+        "add",
+        "--detach",
+        worktree_path.as_str(),
+        branch,
+    ])
+    .current_dir(repo_path);
+    
+    let output = run_command(&mut cmd)?;
 
     if !output.status.success() {
         return Err(format!(
