@@ -9,4 +9,4 @@ path = "src/main.rs"
 
 [dependencies]
 substance = { path = "../../substance" }
-fs-err = "2.11"
+fs-err = "3.0"
