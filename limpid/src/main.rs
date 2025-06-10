@@ -124,7 +124,7 @@ fn create_comparison_workspace(
         "\n  {} Creating facet worktree at main branch...",
         "1️⃣ ".bright_black()
     );
-    create_worktree(facet_repo, &facet_worktree, "main")?;
+    create_worktree(facet_repo, &facet_worktree, "origin/main")?;
 
     // Get current HEAD of limpid for the worktree
     let mut cmd = Command::new("git");
@@ -267,39 +267,43 @@ impl<'a> ComparisonReport<'a> {
         let mut md = String::new();
         
         // Header
-        writeln!(&mut md, "# Limpid Binary Size Analysis Report").unwrap();
+        writeln!(&mut md, "# 🌊 Limpid Binary Size Analysis Report").unwrap();
         writeln!(&mut md).unwrap();
         writeln!(&mut md, "Comparing `main` branch with current commit `{}`", &self.current_hash[..8]).unwrap();
         writeln!(&mut md).unwrap();
         
         // Size comparison summary
-        writeln!(&mut md, "## Size Comparison").unwrap();
+        writeln!(&mut md, "## 📊 Size Comparison").unwrap();
         writeln!(&mut md).unwrap();
         
         let size_diff = self.current_result.analysis.file_size as i64 - self.main_result.analysis.file_size as i64;
         let text_diff = self.current_result.analysis.text_size as i64 - self.main_result.analysis.text_size as i64;
+        let time_diff = self.current_result.wall_time.as_secs_f64() - self.main_result.wall_time.as_secs_f64();
         
         writeln!(&mut md, "| Metric | Main | Current | Change |").unwrap();
         writeln!(&mut md, "|--------|------|---------|--------|").unwrap();
-        writeln!(&mut md, "| File size | {} | {} | {} |", 
+        writeln!(&mut md, "| File size | {} | {} | {} {} |", 
             format_bytes(self.main_result.analysis.file_size),
             format_bytes(self.current_result.analysis.file_size),
+            if size_diff > 0 { "📈" } else if size_diff < 0 { "📉" } else { "➖" },
             format_size_diff_md(size_diff)
         ).unwrap();
-        writeln!(&mut md, "| Text size | {} | {} | {} |", 
+        writeln!(&mut md, "| Text size | {} | {} | {} {} |", 
             format_bytes(self.main_result.analysis.text_size),
             format_bytes(self.current_result.analysis.text_size),
+            if text_diff > 0 { "📈" } else if text_diff < 0 { "📉" } else { "➖" },
             format_size_diff_md(text_diff)
         ).unwrap();
-        writeln!(&mut md, "| Build time | {:.2}s | {:.2}s | {:+.2}s |", 
+        writeln!(&mut md, "| Build time | {:.2}s | {:.2}s | {} {:+.2}s |", 
             self.main_result.wall_time.as_secs_f64(),
             self.current_result.wall_time.as_secs_f64(),
-            self.current_result.wall_time.as_secs_f64() - self.main_result.wall_time.as_secs_f64()
+            if time_diff < 0.0 { "⚡" } else if time_diff > 0.0 { "🐌" } else { "➖" },
+            time_diff
         ).unwrap();
         writeln!(&mut md).unwrap();
         
         // Top crate size changes
-        writeln!(&mut md, "## Top Crate Size Changes").unwrap();
+        writeln!(&mut md, "## 📦 Top Crate Size Changes").unwrap();
         writeln!(&mut md).unwrap();
         writeln!(&mut md, "| Crate | Main | Current | Change | % |").unwrap();
         writeln!(&mut md, "|-------|------|---------|--------|---|").unwrap();
@@ -322,23 +326,25 @@ impl<'a> ComparisonReport<'a> {
                 (Some(before), Some(after)) => {
                     let abs_change = change.absolute_change().unwrap();
                     let pct = change.percent_change().unwrap();
-                    writeln!(&mut md, "| {} | {} | {} | {} | {:+.1}% |",
+                    let emoji = if abs_change > 0 { "📈" } else if abs_change < 0 { "📉" } else { "➖" };
+                    writeln!(&mut md, "| {} | {} | {} | {} {} | {:+.1}% |",
                         change.name,
                         format_bytes(before),
                         format_bytes(after),
+                        emoji,
                         format_size_diff_md(abs_change),
                         pct
                     ).unwrap();
                 }
                 (None, Some(after)) => {
-                    writeln!(&mut md, "| {} | - | {} | {} | NEW |",
+                    writeln!(&mut md, "| {} | - | {} | 🆕 {} | NEW |",
                         change.name,
                         format_bytes(after),
-                        format!("_{}_", format_bytes(after))
+                        format!("+{}", format_bytes(after))
                     ).unwrap();
                 }
                 (Some(before), None) => {
-                    writeln!(&mut md, "| {} | {} | - | {} | REMOVED |",
+                    writeln!(&mut md, "| {} | {} | - | 🗑️ {} | REMOVED |",
                         change.name,
                         format_bytes(before),
                         format!("-{}", format_bytes(before))
@@ -350,7 +356,7 @@ impl<'a> ComparisonReport<'a> {
         writeln!(&mut md).unwrap();
         
         // Top crate build time changes
-        writeln!(&mut md, "## Top Crate Build Time Changes").unwrap();
+        writeln!(&mut md, "## ⏱️ Top Crate Build Time Changes").unwrap();
         writeln!(&mut md).unwrap();
         writeln!(&mut md, "| Crate | Main | Current | Change | % |").unwrap();
         writeln!(&mut md, "|-------|------|---------|--------|---|").unwrap();
@@ -360,23 +366,25 @@ impl<'a> ComparisonReport<'a> {
                 (Some(before), Some(after)) => {
                     let diff = after - before;
                     let pct = (diff / before) * 100.0;
-                    writeln!(&mut md, "| {} | {:.2}s | {:.2}s | {:+.2}s | {:+.1}% |",
+                    let emoji = if diff < 0.0 { "⚡" } else if diff > 0.0 { "🐌" } else { "➖" };
+                    writeln!(&mut md, "| {} | {:.2}s | {:.2}s | {} {:+.2}s | {:+.1}% |",
                         crate_name,
                         before,
                         after,
+                        emoji,
                         diff,
                         pct
                     ).unwrap();
                 }
                 (None, Some(after)) => {
-                    writeln!(&mut md, "| {} | - | {:.2}s | +{:.2}s | NEW |",
+                    writeln!(&mut md, "| {} | - | {:.2}s | 🆕 +{:.2}s | NEW |",
                         crate_name,
                         after,
                         after
                     ).unwrap();
                 }
                 (Some(before), None) => {
-                    writeln!(&mut md, "| {} | {:.2}s | - | -{:.2}s | REMOVED |",
+                    writeln!(&mut md, "| {} | {:.2}s | - | 🗑️ -{:.2}s | REMOVED |",
                         crate_name,
                         before,
                         before
@@ -388,7 +396,7 @@ impl<'a> ComparisonReport<'a> {
         writeln!(&mut md).unwrap();
         
         // Biggest symbol changes
-        writeln!(&mut md, "## Biggest Symbol Changes").unwrap();
+        writeln!(&mut md, "## 🔍 Biggest Symbol Changes").unwrap();
         writeln!(&mut md).unwrap();
         writeln!(&mut md, "<details>").unwrap();
         writeln!(&mut md, "<summary>Top 50 symbol size changes (click to expand)</summary>").unwrap();
@@ -413,7 +421,9 @@ impl<'a> ComparisonReport<'a> {
         for (symbol, change) in changed_symbols.iter().take(50) {
             match (symbol.size_before, symbol.size_after) {
                 (Some(before), Some(after)) => {
-                    writeln!(&mut md, "| {} | {} | {} | `{}` |",
+                    let emoji = if *change > 0 { "📈" } else { "📉" };
+                    writeln!(&mut md, "| {} {} | {} | {} | `{}` |",
+                        emoji,
                         format_size_diff_md(*change),
                         format_bytes(before),
                         format_bytes(after),
@@ -421,14 +431,14 @@ impl<'a> ComparisonReport<'a> {
                     ).unwrap();
                 }
                 (None, Some(after)) => {
-                    writeln!(&mut md, "| +{} | NEW | {} | `{}` |",
+                    writeln!(&mut md, "| 🆕 +{} | NEW | {} | `{}` |",
                         format_bytes(after),
                         format_bytes(after),
                         symbol.demangled
                     ).unwrap();
                 }
                 (Some(before), None) => {
-                    writeln!(&mut md, "| -{} | {} | REMOVED | `{}` |",
+                    writeln!(&mut md, "| 🗑️ -{} | {} | REMOVED | `{}` |",
                         format_bytes(before),
                         format_bytes(before),
                         symbol.demangled
