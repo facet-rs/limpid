@@ -1,6 +1,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use indicatif::{ProgressBar, ProgressStyle};
 use owo_colors::{OwoColorize, Style};
+use std::fmt::Write;
 use std::process::{Command, Output};
 use substance::{
     AnalysisComparison, AnalysisConfig, ArtifactKind, BloatAnalyzer, BuildContext, BuildOptions,
@@ -252,12 +253,201 @@ struct BuildAnalysisResult {
 }
 
 /// Complete comparison report data
-struct ComparisonReport {
-    current_hash: String,
-    main_result: BuildAnalysisResult,
-    current_result: BuildAnalysisResult,
-    comparison: substance::AnalysisComparison,
+struct ComparisonReport<'a> {
+    current_hash: &'a str,
+    main_result: &'a BuildAnalysisResult,
+    current_result: &'a BuildAnalysisResult,
+    comparison: &'a substance::AnalysisComparison,
     crate_time_changes: Vec<(String, Option<f64>, Option<f64>)>,
+}
+
+impl<'a> ComparisonReport<'a> {
+    /// Generate a markdown report
+    fn to_markdown(&self) -> String {
+        let mut md = String::new();
+        
+        // Header
+        writeln!(&mut md, "# Limpid Binary Size Analysis Report").unwrap();
+        writeln!(&mut md).unwrap();
+        writeln!(&mut md, "Comparing `main` branch with current commit `{}`", &self.current_hash[..8]).unwrap();
+        writeln!(&mut md).unwrap();
+        
+        // Size comparison summary
+        writeln!(&mut md, "## Size Comparison").unwrap();
+        writeln!(&mut md).unwrap();
+        
+        let size_diff = self.current_result.analysis.file_size as i64 - self.main_result.analysis.file_size as i64;
+        let text_diff = self.current_result.analysis.text_size as i64 - self.main_result.analysis.text_size as i64;
+        
+        writeln!(&mut md, "| Metric | Main | Current | Change |").unwrap();
+        writeln!(&mut md, "|--------|------|---------|--------|").unwrap();
+        writeln!(&mut md, "| File size | {} | {} | {} |", 
+            format_bytes(self.main_result.analysis.file_size),
+            format_bytes(self.current_result.analysis.file_size),
+            format_size_diff_md(size_diff)
+        ).unwrap();
+        writeln!(&mut md, "| Text size | {} | {} | {} |", 
+            format_bytes(self.main_result.analysis.text_size),
+            format_bytes(self.current_result.analysis.text_size),
+            format_size_diff_md(text_diff)
+        ).unwrap();
+        writeln!(&mut md, "| Build time | {:.2}s | {:.2}s | {:+.2}s |", 
+            self.main_result.wall_time.as_secs_f64(),
+            self.current_result.wall_time.as_secs_f64(),
+            self.current_result.wall_time.as_secs_f64() - self.main_result.wall_time.as_secs_f64()
+        ).unwrap();
+        writeln!(&mut md).unwrap();
+        
+        // Top crate size changes
+        writeln!(&mut md, "## Top Crate Size Changes").unwrap();
+        writeln!(&mut md).unwrap();
+        writeln!(&mut md, "| Crate | Main | Current | Change | % |").unwrap();
+        writeln!(&mut md, "|-------|------|---------|--------|---|").unwrap();
+        
+        let mut crate_changes = self.comparison.crate_changes.clone();
+        crate_changes.sort_by(|a, b| {
+            let a_change = a.absolute_change().map(|c| c.abs()).unwrap_or(0);
+            let b_change = b.absolute_change().map(|c| c.abs()).unwrap_or(0);
+            b_change.cmp(&a_change)
+        });
+        
+        let significant_crate_changes: Vec<_> = crate_changes
+            .iter()
+            .filter(|c| c.absolute_change().map(|change| change != 0).unwrap_or(true))
+            .take(20)
+            .collect();
+        
+        for change in &significant_crate_changes {
+            match (change.size_before, change.size_after) {
+                (Some(before), Some(after)) => {
+                    let abs_change = change.absolute_change().unwrap();
+                    let pct = change.percent_change().unwrap();
+                    writeln!(&mut md, "| {} | {} | {} | {} | {:+.1}% |",
+                        change.name,
+                        format_bytes(before),
+                        format_bytes(after),
+                        format_size_diff_md(abs_change),
+                        pct
+                    ).unwrap();
+                }
+                (None, Some(after)) => {
+                    writeln!(&mut md, "| {} | - | {} | {} | NEW |",
+                        change.name,
+                        format_bytes(after),
+                        format!("_{}_", format_bytes(after))
+                    ).unwrap();
+                }
+                (Some(before), None) => {
+                    writeln!(&mut md, "| {} | {} | - | {} | REMOVED |",
+                        change.name,
+                        format_bytes(before),
+                        format!("-{}", format_bytes(before))
+                    ).unwrap();
+                }
+                _ => {}
+            }
+        }
+        writeln!(&mut md).unwrap();
+        
+        // Top crate build time changes
+        writeln!(&mut md, "## Top Crate Build Time Changes").unwrap();
+        writeln!(&mut md).unwrap();
+        writeln!(&mut md, "| Crate | Main | Current | Change | % |").unwrap();
+        writeln!(&mut md, "|-------|------|---------|--------|---|").unwrap();
+        
+        for (crate_name, before, after) in self.crate_time_changes.iter().take(15) {
+            match (before, after) {
+                (Some(before), Some(after)) => {
+                    let diff = after - before;
+                    let pct = (diff / before) * 100.0;
+                    writeln!(&mut md, "| {} | {:.2}s | {:.2}s | {:+.2}s | {:+.1}% |",
+                        crate_name,
+                        before,
+                        after,
+                        diff,
+                        pct
+                    ).unwrap();
+                }
+                (None, Some(after)) => {
+                    writeln!(&mut md, "| {} | - | {:.2}s | +{:.2}s | NEW |",
+                        crate_name,
+                        after,
+                        after
+                    ).unwrap();
+                }
+                (Some(before), None) => {
+                    writeln!(&mut md, "| {} | {:.2}s | - | -{:.2}s | REMOVED |",
+                        crate_name,
+                        before,
+                        before
+                    ).unwrap();
+                }
+                _ => {}
+            }
+        }
+        writeln!(&mut md).unwrap();
+        
+        // Biggest symbol changes
+        writeln!(&mut md, "## Biggest Symbol Changes").unwrap();
+        writeln!(&mut md).unwrap();
+        writeln!(&mut md, "<details>").unwrap();
+        writeln!(&mut md, "<summary>Top 50 symbol size changes (click to expand)</summary>").unwrap();
+        writeln!(&mut md).unwrap();
+        writeln!(&mut md, "| Change | Before | After | Symbol |").unwrap();
+        writeln!(&mut md, "|--------|--------|-------|--------|").unwrap();
+        
+        let mut changed_symbols: Vec<_> = self.comparison.symbol_changes.iter()
+            .filter_map(|s| match (s.size_before, s.size_after) {
+                (Some(before), Some(after)) if before != after => {
+                    let change = after as i64 - before as i64;
+                    Some((s, change))
+                }
+                (None, Some(after)) => Some((s, after as i64)),
+                (Some(before), None) => Some((s, -(before as i64))),
+                _ => None
+            })
+            .collect();
+        
+        changed_symbols.sort_by_key(|(_, change)| -change.abs());
+        
+        for (symbol, change) in changed_symbols.iter().take(50) {
+            match (symbol.size_before, symbol.size_after) {
+                (Some(before), Some(after)) => {
+                    writeln!(&mut md, "| {} | {} | {} | `{}` |",
+                        format_size_diff_md(*change),
+                        format_bytes(before),
+                        format_bytes(after),
+                        symbol.demangled
+                    ).unwrap();
+                }
+                (None, Some(after)) => {
+                    writeln!(&mut md, "| +{} | NEW | {} | `{}` |",
+                        format_bytes(after),
+                        format_bytes(after),
+                        symbol.demangled
+                    ).unwrap();
+                }
+                (Some(before), None) => {
+                    writeln!(&mut md, "| -{} | {} | REMOVED | `{}` |",
+                        format_bytes(before),
+                        format_bytes(before),
+                        symbol.demangled
+                    ).unwrap();
+                }
+                _ => {}
+            }
+        }
+        
+        writeln!(&mut md).unwrap();
+        writeln!(&mut md, "</details>").unwrap();
+        writeln!(&mut md).unwrap();
+        
+        // Footer
+        writeln!(&mut md, "---").unwrap();
+        writeln!(&mut md, "_Generated by [Limpid](https://github.com/facet-rs/limpid)_").unwrap();
+        
+        md
+    }
 }
 
 /// Build and analyze a specific version of ks-facet
@@ -548,8 +738,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let main_result = build_and_analyze(&main_ks_facet_manifest, &main_target_dir, "main")?;
 
             // Compare analyses
-            println!("\n{}", "📊 Size Comparison:".white().bold());
-            println!("{}", "─".repeat(50).bright_black());
+            if !markdown_mode {
+                println!("\n{}", "📊 Size Comparison:".white().bold());
+                println!("{}", "─".repeat(50).bright_black());
+            }
 
             let size_diff =
                 current_result.analysis.file_size as i64 - main_result.analysis.file_size as i64;
@@ -596,6 +788,90 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Analyze changes using Substance's comparison API
             let comparison =
                 AnalysisComparison::compare(&main_result.analysis, &current_result.analysis)?;
+
+            // Create comparison report
+            let report = ComparisonReport {
+                current_hash: &current_hash,
+                main_result: &main_result,
+                current_result: &current_result,
+                comparison: &comparison,
+                crate_time_changes: vec![], // Will be populated below
+            };
+
+            // Generate markdown if requested
+            if markdown_mode {
+                // Populate crate time changes for the report
+                let mut report = report;
+                
+                // Create maps for timing data
+                let mut main_crate_times: std::collections::HashMap<String, f64> =
+                    std::collections::HashMap::new();
+                let mut current_crate_times: std::collections::HashMap<String, f64> =
+                    std::collections::HashMap::new();
+
+                for timing in &report.main_result.timing_data {
+                    main_crate_times.insert(timing.crate_name.clone(), timing.duration);
+                }
+                for timing in &report.current_result.timing_data {
+                    current_crate_times.insert(timing.crate_name.clone(), timing.duration);
+                }
+
+                // Combine and sort by absolute time difference
+                let mut all_crate_names = std::collections::HashSet::new();
+                all_crate_names.extend(main_crate_times.keys().cloned());
+                all_crate_names.extend(current_crate_times.keys().cloned());
+
+                let mut crate_time_changes: Vec<(String, Option<f64>, Option<f64>)> = all_crate_names
+                    .into_iter()
+                    .map(|name| {
+                        (
+                            name.clone(),
+                            main_crate_times.get(&name).copied(),
+                            current_crate_times.get(&name).copied(),
+                        )
+                    })
+                    .collect();
+
+                crate_time_changes.sort_by(|a, b| {
+                    let a_diff = match (a.1, a.2) {
+                        (Some(before), Some(after)) => (after - before).abs(),
+                        (None, Some(after)) => after,
+                        (Some(before), None) => before,
+                        _ => 0.0,
+                    };
+                    let b_diff = match (b.1, b.2) {
+                        (Some(before), Some(after)) => (after - before).abs(),
+                        (None, Some(after)) => after,
+                        (Some(before), None) => before,
+                        _ => 0.0,
+                    };
+                    b_diff.partial_cmp(&a_diff).unwrap()
+                });
+
+                report.crate_time_changes = crate_time_changes;
+
+                // Generate markdown
+                let markdown = report.to_markdown();
+                
+                // Write to file
+                let output_path = std::path::Path::new("/tmp/limpid.md");
+                std::fs::write(output_path, &markdown)?;
+                eprintln!("📝 Markdown report written to: {}", output_path.display());
+
+                // Also output to stdout for CI
+                println!("{}", markdown);
+
+                // Clean up and exit early
+                if main_target_dir.exists() {
+                    std::fs::remove_dir_all(&main_target_dir)?;
+                }
+                if workspace_dir.exists() {
+                    std::fs::remove_dir_all(&workspace_dir)?;
+                }
+                remove_worktree(&facet_root, &facet_worktree)?;
+                remove_worktree(&limpid_root, &limpid_worktree)?;
+                return Ok(());
+            }
 
             // Show crate-level changes
             let mut crate_changes = comparison.crate_changes.clone();
