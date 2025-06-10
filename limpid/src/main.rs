@@ -1,6 +1,6 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use indicatif::{ProgressBar, ProgressStyle};
-use owo_colors::OwoColorize;
+use owo_colors::{OwoColorize, Style};
 use std::process::{Command, Output};
 use substance::{
     AnalysisComparison, AnalysisConfig, ArtifactKind, BloatAnalyzer, BuildContext, BuildOptions,
@@ -230,12 +230,19 @@ fn find_git_root(start_path: &Utf8Path) -> Result<Utf8PathBuf, Box<dyn std::erro
     Ok(Utf8PathBuf::from(path))
 }
 
+/// Result of build and analysis
+struct BuildAnalysisResult {
+    analysis: substance::AnalysisResult,
+    timing_data: Vec<substance::TimingInfo>,
+    wall_time: std::time::Duration,
+}
+
 /// Build and analyze a specific version of ks-facet
 fn build_and_analyze(
     ks_facet_manifest: &Utf8PathBuf,
     target_dir: &Utf8PathBuf,
     version_name: &str,
-) -> Result<substance::AnalysisResult, Box<dyn std::error::Error>> {
+) -> Result<BuildAnalysisResult, Box<dyn std::error::Error>> {
     println!(
         "\n{} Building {} version...",
         "🚀".yellow(),
@@ -268,6 +275,7 @@ fn build_and_analyze(
     spinner.set_message("Building with cargo...");
     spinner.enable_steady_tick(std::time::Duration::from_millis(100));
 
+    let build_start = std::time::Instant::now();
     let build_result = BuildRunner::new(
         ks_facet_manifest.as_std_path(),
         target_dir.as_std_path(),
@@ -276,16 +284,18 @@ fn build_and_analyze(
     .with_options(build_options)
     .run()?;
 
+    let actual_build_time = build_start.elapsed();
     spinner.finish_and_clear();
 
-    // Calculate total build time
-    let total_build_time: f64 = build_result.timing_data.iter().map(|t| t.duration).sum();
+    // Calculate total build time (sum of all crates - parallel time would be less)
+    let total_crate_time: f64 = build_result.timing_data.iter().map(|t| t.duration).sum();
 
     println!(
-        "{} {} build completed in {:.2}s",
+        "{} {} build completed in {:.2}s (wall time: {:.2}s)",
         "✅".green(),
         version_name.cyan(),
-        total_build_time.to_string().yellow()
+        total_crate_time.to_string().yellow(),
+        actual_build_time.as_secs_f64()
     );
 
     // Find the ks-facet binary
@@ -326,7 +336,11 @@ fn build_and_analyze(
         format_bytes(analysis.text_size).yellow()
     );
 
-    Ok(analysis)
+    Ok(BuildAnalysisResult {
+        analysis,
+        timing_data: build_result.timing_data,
+        wall_time: actual_build_time,
+    })
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -405,12 +419,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&target_dir)?;
 
     // Build and analyze the current version
-    let current_analysis = build_and_analyze(&ks_facet_manifest, &target_dir, "current")?;
+    let current_result = build_and_analyze(&ks_facet_manifest, &target_dir, "current")?;
 
     // Show top crates by size
     println!("\n{} Analyzing crate sizes...", "📊".bright_black());
 
-    let pb = ProgressBar::new(current_analysis.symbols.len() as u64);
+    let pb = ProgressBar::new(current_result.analysis.symbols.len() as u64);
     pb.set_style(
         ProgressStyle::default_bar()
             .template(
@@ -432,7 +446,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         deps_symbols: Default::default(),
     };
 
-    for symbol in &current_analysis.symbols {
+    for symbol in &current_result.analysis.symbols {
         let (crate_name, _) =
             substance::crate_name::from_sym(&build_context, config.split_std, &symbol.name);
         *crate_sizes.entry(crate_name).or_insert(0) += symbol.size;
@@ -449,7 +463,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n{}", "📦 Top 10 Crates by Size:".white().bold());
     println!("{}", "─".repeat(50).bright_black());
     for (crate_name, &size) in crate_list.iter().take(10) {
-        let percent = size as f64 / current_analysis.text_size as f64 * 100.0;
+        let percent = size as f64 / current_result.analysis.text_size as f64 * 100.0;
         let percent_str = format!("{:5.1}%", percent);
         println!(
             "  {:>10} ({}) {}",
@@ -502,23 +516,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 temp_dir.join(format!("limpid-ks-facet-main-{}", std::process::id()));
             std::fs::create_dir_all(&main_target_dir)?;
 
-            let main_analysis =
-                build_and_analyze(&main_ks_facet_manifest, &main_target_dir, "main")?;
+            let main_result = build_and_analyze(&main_ks_facet_manifest, &main_target_dir, "main")?;
 
             // Compare analyses
             println!("\n{}", "📊 Size Comparison:".white().bold());
             println!("{}", "─".repeat(50).bright_black());
 
-            let size_diff = current_analysis.file_size as i64 - main_analysis.file_size as i64;
-            let text_diff = current_analysis.text_size as i64 - main_analysis.text_size as i64;
+            let size_diff =
+                current_result.analysis.file_size as i64 - main_result.analysis.file_size as i64;
+            let text_diff =
+                current_result.analysis.text_size as i64 - main_result.analysis.text_size as i64;
 
             println!(
                 "  {} {}",
                 "File size:".bright_black(),
                 format!(
                     "{} → {} ({})",
-                    format_bytes(main_analysis.file_size).yellow(),
-                    format_bytes(current_analysis.file_size).yellow(),
+                    format_bytes(main_result.analysis.file_size).yellow(),
+                    format_bytes(current_result.analysis.file_size).yellow(),
                     format_size_diff(size_diff)
                 )
                 .white()
@@ -529,15 +544,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "Text size:".bright_black(),
                 format!(
                     "{} → {} ({})",
-                    format_bytes(main_analysis.text_size).yellow(),
-                    format_bytes(current_analysis.text_size).yellow(),
+                    format_bytes(main_result.analysis.text_size).yellow(),
+                    format_bytes(current_result.analysis.text_size).yellow(),
                     format_size_diff(text_diff)
                 )
                 .white()
             );
 
+            // Add build time comparison
+            println!(
+                "  {} {}",
+                "Build time:".bright_black(),
+                format!(
+                    "{:.2}s → {:.2}s ({:+.2}s)",
+                    main_result.wall_time.as_secs_f64(),
+                    current_result.wall_time.as_secs_f64(),
+                    current_result.wall_time.as_secs_f64() - main_result.wall_time.as_secs_f64()
+                )
+                .white()
+            );
+
             // Analyze changes using Substance's comparison API
-            let comparison = AnalysisComparison::compare(&main_analysis, &current_analysis)?;
+            let comparison =
+                AnalysisComparison::compare(&main_result.analysis, &current_result.analysis)?;
 
             // Show crate-level changes
             let mut crate_changes = comparison.crate_changes.clone();
@@ -605,27 +634,123 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
 
-            // First section: Biggest changes by absolute size
-            let mut changed_symbols: Vec<_> = comparison.symbol_changes.iter()
-                .filter_map(|s| {
-                    match (s.size_before, s.size_after) {
-                        (Some(before), Some(after)) if before != after => {
-                            let change = after as i64 - before as i64;
-                            Some((s, change))
-                        }
-                        (None, Some(after)) => Some((s, after as i64)),
-                        (Some(before), None) => Some((s, -(before as i64))),
-                        _ => None
-                    }
+            // Show crate build time changes
+            println!("\n{}", "⏱️  Crate Build Time Changes:".white().bold());
+            println!("{}", "─".repeat(60).bright_black());
+
+            // Create maps for timing data
+            let mut main_crate_times: std::collections::HashMap<String, f64> =
+                std::collections::HashMap::new();
+            let mut current_crate_times: std::collections::HashMap<String, f64> =
+                std::collections::HashMap::new();
+
+            for timing in &main_result.timing_data {
+                main_crate_times.insert(timing.crate_name.clone(), timing.duration);
+            }
+            for timing in &current_result.timing_data {
+                current_crate_times.insert(timing.crate_name.clone(), timing.duration);
+            }
+
+            // Combine and sort by absolute time difference
+            let mut all_crate_names = std::collections::HashSet::new();
+            all_crate_names.extend(main_crate_times.keys().cloned());
+            all_crate_names.extend(current_crate_times.keys().cloned());
+
+            let mut crate_time_changes: Vec<(String, Option<f64>, Option<f64>)> = all_crate_names
+                .into_iter()
+                .map(|name| {
+                    (
+                        name.clone(),
+                        main_crate_times.get(&name).copied(),
+                        current_crate_times.get(&name).copied(),
+                    )
                 })
                 .collect();
-            
+
+            crate_time_changes.sort_by(|a, b| {
+                let a_diff = match (a.1, a.2) {
+                    (Some(before), Some(after)) => (after - before).abs(),
+                    (None, Some(after)) => after,
+                    (Some(before), None) => before,
+                    _ => 0.0,
+                };
+                let b_diff = match (b.1, b.2) {
+                    (Some(before), Some(after)) => (after - before).abs(),
+                    (None, Some(after)) => after,
+                    (Some(before), None) => before,
+                    _ => 0.0,
+                };
+                b_diff.partial_cmp(&a_diff).unwrap()
+            });
+
+            for (crate_name, before, after) in crate_time_changes.iter().take(15) {
+                match (before, after) {
+                    (Some(before), Some(after)) => {
+                        let diff = after - before;
+                        let pct = (diff / before) * 100.0;
+
+                        // Prepare the formatted diff string and its style separately
+                        let (diff_str, style) = if diff > 0.0 {
+                            (format!("+{:.2}s", diff), Style::new().green())
+                        } else {
+                            (format!("{:.2}s", diff), Style::new().red())
+                        };
+
+                        println!(
+                            "  {:>7.2}s → {:>7.2}s ({}) {:+5.1}%  {}",
+                            before,
+                            after,
+                            diff_str.style(style),
+                            pct,
+                            crate_name.bright_white()
+                        );
+                    }
+                    (None, Some(after)) => {
+                        println!(
+                            "  {:>7}   {:>7.2}s ({})   NEW   {}",
+                            " ",
+                            after,
+                            format!("+{:.2}s", after).red(),
+                            crate_name.bright_white()
+                        );
+                    }
+                    (Some(before), None) => {
+                        println!(
+                            "  {:>7.2}s → {:>7}   ({}) REMOVED {}",
+                            before,
+                            "0s",
+                            format!("-{:.2}s", before).green(),
+                            crate_name.bright_white()
+                        );
+                    }
+                    _ => {}
+                }
+            }
+
+            // First section: Biggest changes by absolute size
+            let mut changed_symbols: Vec<_> = comparison
+                .symbol_changes
+                .iter()
+                .filter_map(|s| match (s.size_before, s.size_after) {
+                    (Some(before), Some(after)) if before != after => {
+                        let change = after as i64 - before as i64;
+                        Some((s, change))
+                    }
+                    (None, Some(after)) => Some((s, after as i64)),
+                    (Some(before), None) => Some((s, -(before as i64))),
+                    _ => None,
+                })
+                .collect();
+
             changed_symbols.sort_by_key(|(_, change)| -change.abs());
-            
+
             if !changed_symbols.is_empty() {
-                println!("\n{}", "📈 Biggest Symbol Changes (by size):".white().bold());
+                println!(
+                    "\n{}",
+                    "📈 Biggest Symbol Changes (by size):".white().bold()
+                );
                 println!("{}", "─".repeat(70).bright_black());
-                
+
                 for (change, size_change) in changed_symbols.iter().take(20) {
                     match (change.size_before, change.size_after) {
                         (Some(before), Some(after)) => {
@@ -658,7 +783,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         _ => {}
                     }
                 }
-                
+
                 if changed_symbols.len() > 20 {
                     println!(
                         "  {} ... and {} more changes",
@@ -667,17 +792,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
             }
-            
+
             // Second section: Largest symbols in current (HEAD) version
-            let mut current_symbols: Vec<_> = comparison.symbol_changes.iter()
+            let mut current_symbols: Vec<_> = comparison
+                .symbol_changes
+                .iter()
                 .filter_map(|s| s.size_after.map(|size| (s, size)))
                 .collect();
-            
+
             current_symbols.sort_by_key(|(_, size)| std::cmp::Reverse(*size));
-            
-            println!("\n{}", "🏆 Largest Symbols in Current Version:".white().bold());
+
+            println!(
+                "\n{}",
+                "🏆 Largest Symbols in Current Version:".white().bold()
+            );
             println!("{}", "─".repeat(70).bright_black());
-            
+
             for (symbol, current_size) in current_symbols.iter().take(20) {
                 match symbol.size_before {
                     Some(before) if before != *current_size => {
