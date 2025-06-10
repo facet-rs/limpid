@@ -537,8 +537,6 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 [[package]]
 name = "substance"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "643391b7f3075d496a3b910233f22edfdb2df02ab134969371ab24722b5bcaa5"
 dependencies = [
  "binfarce",
  "facet",

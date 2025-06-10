@@ -8,7 +8,7 @@ name = "limpid"
 path = "src/main.rs"
 
 [dependencies]
-substance = "0.3.1"
+substance = { path = "../../substance" }
 camino = "1.1"
 env_logger = "0.11"
 owo-colors = "4.0"

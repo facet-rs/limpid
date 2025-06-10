@@ -271,7 +271,7 @@ fn build_and_analyze(
     let build_result = BuildRunner::new(
         ks_facet_manifest.as_std_path(),
         target_dir.as_std_path(),
-        BuildType::Debug,
+        BuildType::Release,
     )
     .with_options(build_options)
     .run()?;
@@ -605,38 +605,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
 
-            // Show top symbol changes (only those with significant relative change)
-            let mut symbol_changes = comparison.symbol_changes.clone();
-            symbol_changes.sort_by(|a, b| {
-                let a_pct = a.percent_change().map(|p| p.abs()).unwrap_or(0.0);
-                let b_pct = b.percent_change().map(|p| p.abs()).unwrap_or(0.0);
-                b_pct.partial_cmp(&a_pct).unwrap()
-            });
-
-            let significant_symbol_changes: Vec<_> = symbol_changes
-                .into_iter()
-                .filter(|s| {
+            // First section: Biggest changes by absolute size
+            let mut changed_symbols: Vec<_> = comparison.symbol_changes.iter()
+                .filter_map(|s| {
                     match (s.size_before, s.size_after) {
-                        (Some(before), Some(after)) => {
-                            before != after
-                                && s.percent_change().map(|p| p.abs() > 5.0).unwrap_or(false)
+                        (Some(before), Some(after)) if before != after => {
+                            let change = after as i64 - before as i64;
+                            Some((s, change))
                         }
-                        _ => true, // Include new or removed symbols
+                        (None, Some(after)) => Some((s, after as i64)),
+                        (Some(before), None) => Some((s, -(before as i64))),
+                        _ => None
                     }
                 })
                 .collect();
-
-            if !significant_symbol_changes.is_empty() {
-                println!("\n{}", "🔍 Top Symbol Changes (>5% change):".white().bold());
-                println!("{}", "─".repeat(60).bright_black());
-
-                for change in significant_symbol_changes.iter().take(20) {
+            
+            changed_symbols.sort_by_key(|(_, change)| -change.abs());
+            
+            if !changed_symbols.is_empty() {
+                println!("\n{}", "📈 Biggest Symbol Changes (by size):".white().bold());
+                println!("{}", "─".repeat(70).bright_black());
+                
+                for (change, size_change) in changed_symbols.iter().take(20) {
                     match (change.size_before, change.size_after) {
                         (Some(before), Some(after)) => {
-                            let pct = change.percent_change().unwrap();
                             println!(
-                                "  {:+6.1}% {:>10} → {:>10} {}",
-                                pct,
+                                "  {:>10} {:>10} → {:>10}  {}",
+                                format_size_diff(*size_change),
                                 format_bytes(before).yellow(),
                                 format_bytes(after).yellow(),
                                 change.demangled.bright_white()
@@ -644,30 +639,71 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         (None, Some(after)) => {
                             println!(
-                                "    NEW   {:>10}              {}",
+                                "  {:>10} {:>10}   {:>10}  {}",
+                                format!("+({})", format_bytes(after)).red(),
+                                "NEW".green(),
                                 format_bytes(after).yellow(),
                                 change.demangled.bright_white()
                             );
                         }
                         (Some(before), None) => {
                             println!(
-                                " REMOVED {:>10}              {}",
+                                "  {:>10} {:>10}   {:>10}  {}",
+                                format!("-{}", format_bytes(before)).green(),
                                 format_bytes(before).yellow(),
+                                "REMOVED".red(),
                                 change.demangled.bright_white()
                             );
                         }
                         _ => {}
                     }
                 }
-
-                if significant_symbol_changes.len() > 20 {
+                
+                if changed_symbols.len() > 20 {
                     println!(
-                        "  {} ... and {} more significant changes",
+                        "  {} ... and {} more changes",
                         " ".repeat(10).bright_black(),
-                        (significant_symbol_changes.len() - 20)
-                            .to_string()
-                            .bright_cyan()
+                        (changed_symbols.len() - 20).to_string().bright_cyan()
                     );
+                }
+            }
+            
+            // Second section: Largest symbols in current (HEAD) version
+            let mut current_symbols: Vec<_> = comparison.symbol_changes.iter()
+                .filter_map(|s| s.size_after.map(|size| (s, size)))
+                .collect();
+            
+            current_symbols.sort_by_key(|(_, size)| std::cmp::Reverse(*size));
+            
+            println!("\n{}", "🏆 Largest Symbols in Current Version:".white().bold());
+            println!("{}", "─".repeat(70).bright_black());
+            
+            for (symbol, current_size) in current_symbols.iter().take(20) {
+                match symbol.size_before {
+                    Some(before) if before != *current_size => {
+                        let change = *current_size as i64 - before as i64;
+                        println!(
+                            "  {:>10} ({:>10})  {}",
+                            format_bytes(*current_size).yellow(),
+                            format_size_diff(change),
+                            symbol.demangled.bright_white()
+                        );
+                    }
+                    None => {
+                        println!(
+                            "  {:>10} ({:>10})  {}",
+                            format_bytes(*current_size).yellow(),
+                            "NEW".green(),
+                            symbol.demangled.bright_white()
+                        );
+                    }
+                    _ => {
+                        println!(
+                            "  {:>10}               {}",
+                            format_bytes(*current_size).yellow(),
+                            symbol.demangled.bright_white()
+                        );
+                    }
                 }
             }
 
