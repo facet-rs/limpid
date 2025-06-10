@@ -79,10 +79,11 @@ fn remove_worktree(
     }
 
     // Run git worktree prune to clean up
-    let output = Command::new("git")
-        .args(["worktree", "prune"])
-        .current_dir(repo_path)
-        .output()?;
+    let mut cmd = Command::new("git");
+    cmd.args(["worktree", "prune"])
+        .current_dir(repo_path);
+    
+    let output = run_command(&mut cmd)?;
 
     if !output.status.success() {
         eprintln!(
@@ -127,9 +128,10 @@ fn format_size_diff(diff: i64) -> String {
 
 /// Get the default target triple from rustc
 fn get_default_target() -> Result<String, Box<dyn std::error::Error>> {
-    let output = Command::new("rustc")
-        .args(["--print", "target-libdir"])
-        .output()?;
+    let mut cmd = Command::new("rustc");
+    cmd.args(["--print", "target-libdir"]);
+    
+    let output = run_command(&mut cmd)?;
 
     let path = std::str::from_utf8(&output.stdout)?.trim();
     // Extract target from path like: /path/to/rustlib/aarch64-apple-darwin/lib
@@ -147,10 +149,11 @@ fn get_default_target() -> Result<String, Box<dyn std::error::Error>> {
 
 /// Find the root of a git repository starting from the given path
 fn find_git_root(start_path: &Utf8Path) -> Result<Utf8PathBuf, Box<dyn std::error::Error>> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(start_path)
-        .output()?;
+    let mut cmd = Command::new("git");
+    cmd.args(["rev-parse", "--show-toplevel"])
+        .current_dir(start_path);
+    
+    let output = run_command(&mut cmd)?;
 
     if !output.status.success() {
         return Err(format!(
@@ -412,10 +415,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", "─".repeat(40).bright_black());
 
         // Get current commit hash
-        let current_commit = Command::new("git")
-            .args(["rev-parse", "HEAD"])
-            .current_dir(&facet_root)
-            .output()?;
+        let mut cmd = Command::new("git");
+        cmd.args(["rev-parse", "HEAD"])
+            .current_dir(&facet_root);
+        
+        let current_commit = run_command(&mut cmd)?;
         let current_hash = std::str::from_utf8(&current_commit.stdout)?.trim();
         println!(
             "{} {} ({})",
