@@ -4,7 +4,7 @@ use owo_colors::{OwoColorize, Style};
 use std::fmt::Write;
 use std::process::{Command, Output};
 use substance::{
-    AnalysisComparison, AnalysisConfig, ArtifactKind, BloatAnalyzer, BuildContext, BuildOptions,
+    AnalysisComparison, AnalysisConfig, ArtifactKind, BloatAnalyzer, BuildOptions,
     BuildRunner, BuildType,
 };
 
@@ -205,6 +205,7 @@ fn format_size_diff_md(diff: i64) -> String {
 }
 
 /// Get the default target triple from rustc
+#[allow(dead_code)]
 fn get_default_target() -> Result<String, Box<dyn std::error::Error>> {
     let mut cmd = Command::new("rustc");
     cmd.args(["--print", "target-libdir"]);
@@ -250,6 +251,7 @@ struct BuildAnalysisResult {
     analysis: substance::AnalysisResult,
     timing_data: Vec<substance::TimingInfo>,
     wall_time: std::time::Duration,
+    build_context: substance::BuildContext,
 }
 
 /// Complete comparison report data
@@ -452,6 +454,102 @@ impl<'a> ComparisonReport<'a> {
         writeln!(&mut md, "</details>").unwrap();
         writeln!(&mut md).unwrap();
         
+        // Top crates by size in current version
+        writeln!(&mut md, "## 📦 Top Crates by Size (Current Version)").unwrap();
+        writeln!(&mut md).unwrap();
+        writeln!(&mut md, "| Crate | Size | % of Total |").unwrap();
+        writeln!(&mut md, "|-------|------|------------|").unwrap();
+        
+        // Calculate crate sizes for current version
+        let config = AnalysisConfig::default();
+        let mut current_crate_sizes = std::collections::HashMap::new();
+        
+        for symbol in &self.current_result.analysis.symbols {
+            let (crate_name, _) = substance::crate_name::from_sym(&self.current_result.build_context, config.split_std, &symbol.name);
+            *current_crate_sizes.entry(crate_name).or_insert(0) += symbol.size;
+        }
+        
+        // Sort crates by size
+        let mut crate_list: Vec<(&String, &u64)> = current_crate_sizes.iter().collect();
+        crate_list.sort_by_key(|(_name, &size)| std::cmp::Reverse(size));
+        
+        for (crate_name, &size) in crate_list.iter().take(15) {
+            let percent = size as f64 / self.current_result.analysis.text_size as f64 * 100.0;
+            writeln!(&mut md, "| {} | {} | {:.1}% |",
+                crate_name,
+                format_bytes(size),
+                percent
+            ).unwrap();
+        }
+        writeln!(&mut md).unwrap();
+        
+        // Top symbols by size in current version
+        writeln!(&mut md, "## 🔍 Top Symbols by Size (Current Version)").unwrap();
+        writeln!(&mut md).unwrap();
+        writeln!(&mut md, "<details>").unwrap();
+        writeln!(&mut md, "<summary>Top 30 largest symbols (click to expand)</summary>").unwrap();
+        writeln!(&mut md).unwrap();
+        writeln!(&mut md, "| Size | Symbol |").unwrap();
+        writeln!(&mut md, "|------|--------|").unwrap();
+        
+        let mut current_symbols: Vec<_> = self.current_result.analysis.symbols.iter()
+            .map(|s| (s, s.size))
+            .collect();
+        current_symbols.sort_by_key(|(_, size)| std::cmp::Reverse(*size));
+        
+        for (symbol, size) in current_symbols.iter().take(30) {
+            writeln!(&mut md, "| {} | `{}` |",
+                format_bytes(*size),
+                symbol.name.trimmed
+            ).unwrap();
+        }
+        
+        writeln!(&mut md).unwrap();
+        writeln!(&mut md, "</details>").unwrap();
+        writeln!(&mut md).unwrap();
+        
+        // LLVM IR Analysis (if available)
+        if let Some(llvm_analysis) = &self.current_result.analysis.llvm_ir_data {
+            writeln!(&mut md, "## 🔥 LLVM IR Analysis (Current Version)").unwrap();
+            writeln!(&mut md).unwrap();
+            writeln!(&mut md, "| Metric | Value |").unwrap();
+            writeln!(&mut md, "|--------|-------|").unwrap();
+            writeln!(&mut md, "| Total LLVM IR lines | {} |", llvm_analysis.total_lines).unwrap();
+            writeln!(&mut md, "| Total instantiations | {} |", llvm_analysis.total_copies).unwrap();
+            writeln!(&mut md, "| Analyzed .ll files | {} |", llvm_analysis.analyzed_files.len()).unwrap();
+            writeln!(&mut md).unwrap();
+            
+            // Top functions by LLVM IR lines
+            writeln!(&mut md, "### 🔍 Top Functions by LLVM IR Lines").unwrap();
+            writeln!(&mut md).unwrap();
+            writeln!(&mut md, "<details>").unwrap();
+            writeln!(&mut md, "<summary>Top 30 most complex functions (click to expand)</summary>").unwrap();
+            writeln!(&mut md).unwrap();
+            writeln!(&mut md, "| Lines | % | Copies | Function |").unwrap();
+            writeln!(&mut md, "|-------|---|--------|----------|").unwrap();
+            
+            let mut functions: Vec<(&String, &substance::llvm_ir::LlvmInstantiations)> = 
+                llvm_analysis.instantiations.iter().collect();
+            functions.sort_by_key(|(_, stats)| std::cmp::Reverse(stats.total_lines));
+            
+            for (func_name, stats) in functions.iter().take(30) {
+                let percent = stats.total_lines as f64 / llvm_analysis.total_lines as f64 * 100.0;
+                writeln!(&mut md, "| {} | {:.1}% | {} | `{}` |",
+                    stats.total_lines,
+                    percent,
+                    stats.copies,
+                    func_name
+                ).unwrap();
+            }
+            
+            writeln!(&mut md).unwrap();
+            writeln!(&mut md, "</details>").unwrap();
+            writeln!(&mut md).unwrap();
+        } else {
+            writeln!(&mut md, "_💡 Tip: LLVM IR analysis data not available. This is likely due to missing .ll files in the build output._").unwrap();
+            writeln!(&mut md).unwrap();
+        }
+        
         // Footer
         writeln!(&mut md, "---").unwrap();
         writeln!(&mut md, "_Generated by [Limpid](https://github.com/facet-rs/limpid)_").unwrap();
@@ -546,7 +644,11 @@ fn build_and_analyze(
     analysis_spinner.set_message("Computing binary analysis...");
     analysis_spinner.enable_steady_tick(std::time::Duration::from_millis(100));
 
-    let config = AnalysisConfig::default();
+    let config = AnalysisConfig {
+        analyze_llvm_ir: true,
+        target_dir: Some(target_dir.as_std_path().to_owned()),
+        ..Default::default()
+    };
     let analysis =
         BloatAnalyzer::analyze_binary(&ks_facet_binary.path, &build_result.context, &config)?;
 
@@ -563,6 +665,7 @@ fn build_and_analyze(
         analysis,
         timing_data: build_result.timing_data,
         wall_time: actual_build_time,
+        build_context: build_result.context,
     })
 }
 
@@ -601,10 +704,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
-    if !markdown_mode {
-        println!("{}", "🌊 Limpid - Binary Size Analyzer".blue().bold());
-        println!("{}", "─".repeat(40).bright_black());
-    }
+    // Always print the header regardless of markdown mode
+    println!("{}", "🌊 Limpid - Binary Size Analyzer".blue().bold());
+    println!("{}", "─".repeat(40).bright_black());
 
     // Get current directory
     let current_dir = Utf8PathBuf::from_path_buf(std::env::current_dir()?)
@@ -691,17 +793,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = AnalysisConfig::default();
     let mut crate_sizes = std::collections::HashMap::new();
 
-    let build_context = BuildContext {
-        target_triple: get_default_target()?,
-        artifacts: vec![],
-        std_crates: vec![],
-        dep_crates: vec![],
-        deps_symbols: Default::default(),
-    };
-
     for symbol in &current_result.analysis.symbols {
         let (crate_name, _) =
-            substance::crate_name::from_sym(&build_context, config.split_std, &symbol.name);
+            substance::crate_name::from_sym(&current_result.build_context, config.split_std, &symbol.name);
         *crate_sizes.entry(crate_name).or_insert(0) += symbol.size;
         pb.inc(1);
     }
@@ -724,6 +818,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             percent_str.bright_cyan(),
             crate_name.bright_white()
         );
+    }
+
+    // Show LLVM IR analysis if available
+    if let Some(llvm_analysis) = &current_result.analysis.llvm_ir_data {
+        println!("\n{}", "🔥 LLVM IR Analysis:".white().bold());
+        println!("{}", "─".repeat(50).bright_black());
+        println!("  {} {}", "Total LLVM IR lines:".bright_black(), llvm_analysis.total_lines.to_string().yellow());
+        println!("  {} {}", "Total instantiations:".bright_black(), llvm_analysis.total_copies.to_string().yellow());
+        println!("  {} {}", "Analyzed .ll files:".bright_black(), llvm_analysis.analyzed_files.len().to_string().yellow());
+
+        // Show top functions by LLVM IR lines
+        let mut functions: Vec<(&String, &substance::llvm_ir::LlvmInstantiations)> = 
+            llvm_analysis.instantiations.iter().collect();
+        functions.sort_by_key(|(_, stats)| std::cmp::Reverse(stats.total_lines));
+
+        println!("\n{}", "🔍 Top 10 Functions by LLVM IR Lines:".white().bold());
+        println!("{}", "─".repeat(70).bright_black());
+        for (rank, (func_name, stats)) in functions.iter().take(10).enumerate() {
+            let percent = stats.total_lines as f64 / llvm_analysis.total_lines as f64 * 100.0;
+            println!(
+                "{:2}. {:>6} lines ({:>5.1}%) {} instantiations - {}",
+                rank + 1,
+                stats.total_lines.to_string().yellow(),
+                percent,
+                stats.copies.to_string().bright_cyan(),
+                func_name.bright_white()
+            );
+        }
     }
 
     // Clean up temporary directory
@@ -772,10 +894,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let main_result = build_and_analyze(&main_ks_facet_manifest, &main_target_dir, "main")?;
 
             // Compare analyses
-            if !markdown_mode {
-                println!("\n{}", "📊 Size Comparison:".white().bold());
-                println!("{}", "─".repeat(50).bright_black());
-            }
+            println!("\n{}", "📊 Size Comparison:".white().bold());
+            println!("{}", "─".repeat(50).bright_black());
 
             let size_diff =
                 current_result.analysis.file_size as i64 - main_result.analysis.file_size as i64;
@@ -823,67 +943,62 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let comparison =
                 AnalysisComparison::compare(&main_result.analysis, &current_result.analysis)?;
 
+            // Prepare crate time changes data (needed for both markdown and CLI output)
+            let mut main_crate_times: std::collections::HashMap<String, f64> =
+                std::collections::HashMap::new();
+            let mut current_crate_times: std::collections::HashMap<String, f64> =
+                std::collections::HashMap::new();
+
+            for timing in &main_result.timing_data {
+                main_crate_times.insert(timing.crate_name.clone(), timing.duration);
+            }
+            for timing in &current_result.timing_data {
+                current_crate_times.insert(timing.crate_name.clone(), timing.duration);
+            }
+
+            // Combine and sort by absolute time difference
+            let mut all_crate_names = std::collections::HashSet::new();
+            all_crate_names.extend(main_crate_times.keys().cloned());
+            all_crate_names.extend(current_crate_times.keys().cloned());
+
+            let mut crate_time_changes: Vec<(String, Option<f64>, Option<f64>)> = all_crate_names
+                .into_iter()
+                .map(|name| {
+                    (
+                        name.clone(),
+                        main_crate_times.get(&name).copied(),
+                        current_crate_times.get(&name).copied(),
+                    )
+                })
+                .collect();
+
+            crate_time_changes.sort_by(|a, b| {
+                let a_diff = match (a.1, a.2) {
+                    (Some(before), Some(after)) => (after - before).abs(),
+                    (None, Some(after)) => after,
+                    (Some(before), None) => before,
+                    _ => 0.0,
+                };
+                let b_diff = match (b.1, b.2) {
+                    (Some(before), Some(after)) => (after - before).abs(),
+                    (None, Some(after)) => after,
+                    (Some(before), None) => before,
+                    _ => 0.0,
+                };
+                b_diff.partial_cmp(&a_diff).unwrap()
+            });
+
             // Create comparison report
             let report = ComparisonReport {
                 current_hash: &current_hash,
                 main_result: &main_result,
                 current_result: &current_result,
                 comparison: &comparison,
-                crate_time_changes: vec![], // Will be populated below
+                crate_time_changes,
             };
 
             // Generate markdown if requested
             if markdown_mode {
-                // Populate crate time changes for the report
-                let mut report = report;
-                
-                // Create maps for timing data
-                let mut main_crate_times: std::collections::HashMap<String, f64> =
-                    std::collections::HashMap::new();
-                let mut current_crate_times: std::collections::HashMap<String, f64> =
-                    std::collections::HashMap::new();
-
-                for timing in &report.main_result.timing_data {
-                    main_crate_times.insert(timing.crate_name.clone(), timing.duration);
-                }
-                for timing in &report.current_result.timing_data {
-                    current_crate_times.insert(timing.crate_name.clone(), timing.duration);
-                }
-
-                // Combine and sort by absolute time difference
-                let mut all_crate_names = std::collections::HashSet::new();
-                all_crate_names.extend(main_crate_times.keys().cloned());
-                all_crate_names.extend(current_crate_times.keys().cloned());
-
-                let mut crate_time_changes: Vec<(String, Option<f64>, Option<f64>)> = all_crate_names
-                    .into_iter()
-                    .map(|name| {
-                        (
-                            name.clone(),
-                            main_crate_times.get(&name).copied(),
-                            current_crate_times.get(&name).copied(),
-                        )
-                    })
-                    .collect();
-
-                crate_time_changes.sort_by(|a, b| {
-                    let a_diff = match (a.1, a.2) {
-                        (Some(before), Some(after)) => (after - before).abs(),
-                        (None, Some(after)) => after,
-                        (Some(before), None) => before,
-                        _ => 0.0,
-                    };
-                    let b_diff = match (b.1, b.2) {
-                        (Some(before), Some(after)) => (after - before).abs(),
-                        (None, Some(after)) => after,
-                        (Some(before), None) => before,
-                        _ => 0.0,
-                    };
-                    b_diff.partial_cmp(&a_diff).unwrap()
-                });
-
-                report.crate_time_changes = crate_time_changes;
-
                 // Generate markdown
                 let markdown = report.to_markdown();
                 
@@ -891,17 +1006,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let output_path = std::path::Path::new(markdown_output_path.as_ref().unwrap());
                 std::fs::write(output_path, &markdown)?;
                 eprintln!("📝 Markdown report written to: {}", output_path.display());
-
-                // Clean up and exit early
-                if main_target_dir.exists() {
-                    std::fs::remove_dir_all(&main_target_dir)?;
-                }
-                if workspace_dir.exists() {
-                    std::fs::remove_dir_all(&workspace_dir)?;
-                }
-                remove_worktree(&facet_root, &facet_worktree)?;
-                remove_worktree(&limpid_root, &limpid_worktree)?;
-                return Ok(());
             }
 
             // Show crate-level changes
