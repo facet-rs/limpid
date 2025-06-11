@@ -573,9 +573,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     env_logger::init();
 
-    // Check for --markdown flag
+    // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
-    let markdown_mode = args.iter().any(|arg| arg == "--markdown" || arg == "-m");
+    let mut markdown_mode = false;
+    let mut markdown_output_path: Option<String> = None;
+    
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--markdown" | "-m" => {
+                markdown_mode = true;
+                // Check if next argument is a path
+                if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                    markdown_output_path = Some(args[i + 1].clone());
+                    i += 1;
+                }
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    
+    // If markdown mode is enabled but no path provided, show error
+    if markdown_mode && markdown_output_path.is_none() {
+        eprintln!("Error: --markdown flag requires a file path argument");
+        eprintln!("Usage: {} --markdown <output-file>", args[0]);
+        std::process::exit(1);
+    }
 
     if !markdown_mode {
         println!("{}", "🌊 Limpid - Binary Size Analyzer".blue().bold());
@@ -863,13 +887,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Generate markdown
                 let markdown = report.to_markdown();
                 
-                // Write to file
-                let output_path = std::path::Path::new("/tmp/limpid.md");
+                // Write to file using the provided path
+                let output_path = std::path::Path::new(markdown_output_path.as_ref().unwrap());
                 std::fs::write(output_path, &markdown)?;
                 eprintln!("📝 Markdown report written to: {}", output_path.display());
-
-                // Also output to stdout for CI
-                println!("{}", markdown);
 
                 // Clean up and exit early
                 if main_target_dir.exists() {
