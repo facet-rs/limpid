@@ -295,21 +295,13 @@ pub(crate) fn generate_reports(
         .collect();
     sorted_syms.sort_by_key(|sym| cmp::Reverse(sym.size_diff.abs() as u64));
 
-    // Take at most the top 20 entries for the detailed list and partition the rest
-    let (detailed_syms, excluded_syms): (Vec<&ComparativeSymbol>, Vec<&ComparativeSymbol>) =
-        comparative_syms.iter().partition(|sym| {
-            sorted_syms.iter().take(20).any(|sorted_sym| {
-                let sym_name = sym
-                    .new
-                    .map(|s| s.name.as_str())
-                    .or_else(|| sym.old.map(|s| s.name.as_str()));
-                let sorted_name = sorted_sym
-                    .new
-                    .map(|s| s.name.as_str())
-                    .or_else(|| sorted_sym.old.map(|s| s.name.as_str()));
-                sym_name == sorted_name
-            })
-        });
+    // Take at most the top N entries for the detailed list and partition the rest
+    const TOP_N_SYMBOLS: usize = 20;
+
+    let detailed_syms: Vec<&ComparativeSymbol> =
+        sorted_syms.iter().take(TOP_N_SYMBOLS).copied().collect();
+    let excluded_syms: Vec<&ComparativeSymbol> =
+        sorted_syms.iter().skip(TOP_N_SYMBOLS).copied().collect();
 
     // If there are no size changes at all
     if !detailed_syms.is_empty() {
