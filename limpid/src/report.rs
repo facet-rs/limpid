@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use owo_colors::OwoColorize;
 use std::{cmp, fmt::Write};
-use substance::{AggregateSymbol, BuildContext, ByteSize};
+use substance::{AggregateSymbol, BuildContext};
 
 /// Generate a text (with colors) and a markdown report comparing two builds
 pub(crate) fn generate_reports(
@@ -83,46 +83,25 @@ pub(crate) fn generate_reports(
     md!("Number of crates: {}", current_num_crates);
     unitless_diff!(baseline_num_crates as isize, current_num_crates as isize);
     tx!("\n");
-    md!("\n\n");
+    md!("  \n");
 
-    // .text section size
-    tx!(
-        "Text section size: {}",
-        format_bytes(current.text_size.value()).cyan()
-    );
-    md!(
-        "Text section size: {}",
-        format_bytes(current.text_size.value())
-    );
-    bytes_diff!(baseline.text_size.value(), current.text_size.value());
-    tx!("\n");
-    md!("\n\n");
-
-    // Number of symbols
+    // Number of symbols and .text section size on a single line
     let current_num_symbols = current.deps_symbols.len();
     let baseline_num_symbols = baseline.deps_symbols.len();
 
-    tx!("Number of symbols: {}", current_num_symbols.blue());
-    md!("Number of symbols: {}", current_num_symbols);
+    tx!("{} symbols", current_num_symbols.blue());
+    md!("{} symbols", current_num_symbols);
     unitless_diff!(baseline_num_symbols as isize, current_num_symbols as isize);
-    tx!("\n");
-    md!("\n\n");
-
-    // Number of LLVM IR lines
-    let current_llvm_lines = current.num_llvm_lines();
-    let baseline_llvm_lines = baseline.num_llvm_lines();
 
     tx!(
-        "Number of LLVM lines: {}",
-        fmt_thousands(current_llvm_lines as isize).blue()
+        ", totaling {}",
+        format_bytes(current.text_size.value()).cyan()
     );
-    md!(
-        "Number of LLVM lines: {}",
-        fmt_thousands(current_llvm_lines as isize)
-    );
-    unitless_diff!(baseline_llvm_lines as isize, current_llvm_lines as isize);
+    md!(", totaling {}", format_bytes(current.text_size.value()));
+    bytes_diff!(baseline.text_size.value(), current.text_size.value());
+
     tx!("\n");
-    md!("\n");
+    md!("  \n");
 
     // Now let's select interesting symbols: any in the top 20 largest symbols in baseline or in current.
     // Then we'll assign them a rank in baseline and a rank in current.
@@ -140,15 +119,14 @@ pub(crate) fn generate_reports(
         .sorted_by_key(|sym| cmp::Reverse(sym.total_size))
         .collect();
 
-    // Pick the top 20 symbols from both baseline and current, merge and dedup by name.
-    let top_current: Vec<&AggregateSymbol> = current_syms_sorted.iter().take(20).collect();
-    let top_baseline: Vec<&AggregateSymbol> = baseline_syms_sorted.iter().take(20).collect();
+    // Pick the top symbols from both baseline and current, merge and dedup by name.
+    let top_current: Vec<&AggregateSymbol> = current_syms_sorted.iter().take(1000).collect();
+    let top_baseline: Vec<&AggregateSymbol> = baseline_syms_sorted.iter().take(1000).collect();
 
     struct ComparativeSymbol<'a> {
         old: Option<&'a AggregateSymbol>,
         new: Option<&'a AggregateSymbol>,
-        // new size if available, otherwise old size
-        size: ByteSize,
+        size_diff: isize,
     }
 
     // Merge the top symbols from both baseline and current by name, deduped.
@@ -162,70 +140,180 @@ pub(crate) fn generate_reports(
     for &name in &symbol_names {
         let old = baseline_sym_map.get(name);
         let new = current_sym_map.get(name);
-        // size is new.size if present, else old.size, else 0
-        let size = if let Some(sym) = new {
-            sym.total_size
-        } else if let Some(sym) = old {
-            sym.total_size
-        } else {
-            unreachable!()
-        };
-        comparative_syms.push(ComparativeSymbol { old, new, size });
+
+        // Compute the raw byte-difference between current and baseline.
+        // Missing entries are treated as size 0 on the corresponding side.
+        let old_bytes = old.map(|s| s.total_size.value()).unwrap_or(0);
+        let new_bytes = new.map(|s| s.total_size.value()).unwrap_or(0);
+        let size_diff = new_bytes as isize - old_bytes as isize;
+
+        comparative_syms.push(ComparativeSymbol {
+            old,
+            new,
+            size_diff,
+        });
     }
 
-    // Sort comparative_syms by size descending
-    comparative_syms.sort_by_key(|sym| cmp::Reverse(sym.size));
+    // Sort comparative_syms by the absolute byte difference (largest first)
+    let mut sorted_syms: Vec<&ComparativeSymbol> = comparative_syms
+        .iter()
+        .filter(|sym| sym.size_diff != 0) // ignore symbols with no change
+        .collect();
+    sorted_syms.sort_by_key(|sym| cmp::Reverse(sym.size_diff.abs() as u64));
 
-    // Render a Markdown table comparing symbol sizes between baseline and current
-    md!("## Top Symbol Size Comparison\n\n");
-    md!("| Symbol | Baseline Size | Current Size | Change |\n");
-    md!("|--------|---------------|--------------|--------|\n");
-    for sym in &comparative_syms {
-        let name = sym
-            .new
-            .map(|s| s.name.as_str())
-            .or_else(|| sym.old.map(|s| s.name.as_str()))
-            .unwrap_or("<unknown>");
-        let baseline_size = sym.old.map(|s| s.total_size.value());
-        let current_size = sym.new.map(|s| s.total_size.value());
-        let (old_sz, new_sz) = (baseline_size.unwrap_or(0), current_size.unwrap_or(0));
-        // Format sizes
-        let baseline_fmt = if let Some(sz) = baseline_size {
-            format_bytes(sz)
-        } else {
-            "—".to_string()
-        };
-        let current_fmt = if let Some(sz) = current_size {
-            format_bytes(sz)
-        } else {
-            "—".to_string()
-        };
-        // Change column
-        let change_str = if baseline_size.is_some() && current_size.is_some() {
+    // Take at most the top 20 entries for the detailed list and partition the rest
+    let (detailed_syms, excluded_syms): (Vec<&ComparativeSymbol>, Vec<&ComparativeSymbol>) =
+        comparative_syms.iter().partition(|sym| {
+            sorted_syms.iter().take(20).any(|sorted_sym| {
+                let sym_name = sym
+                    .new
+                    .map(|s| s.name.as_str())
+                    .or_else(|| sym.old.map(|s| s.name.as_str()));
+                let sorted_name = sorted_sym
+                    .new
+                    .map(|s| s.name.as_str())
+                    .or_else(|| sorted_sym.old.map(|s| s.name.as_str()));
+                sym_name == sorted_name
+            })
+        });
+
+    // If there are no size changes at all
+    if detailed_syms.is_empty() {
+        tx!("{}", "No symbol size changes detected.\n".yellow());
+        md!("No symbol size changes detected.\n\n");
+    } else {
+        // Render a Markdown table comparing symbol sizes between baseline and current.
+        md!("\n## Top Symbol Size Changes (by absolute byte diff)\n\n");
+        md!("| Symbol | Crates | Baseline Size | Current Size | Change |\n");
+        md!("|--------|--------|---------------|--------------|--------|\n");
+
+        for sym in detailed_syms.iter() {
+            let name = sym
+                .new
+                .map(|s| s.name.as_str())
+                .or_else(|| sym.old.map(|s| s.name.as_str()))
+                .unwrap_or("<unknown>");
+
+            // Get crates from the current symbol, or fall back to baseline
+            let crates = sym
+                .new
+                .map(|s| &s.crates)
+                .or_else(|| sym.old.map(|s| &s.crates));
+
+            let crates_str = if let Some(crates_set) = crates {
+                if crates_set.is_empty() {
+                    "—".to_string()
+                } else {
+                    crates_set
+                        .iter()
+                        .map(|c| c.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
+            } else {
+                "—".to_string()
+            };
+
+            let baseline_size = sym.old.map(|s| s.total_size.value());
+            let current_size = sym.new.map(|s| s.total_size.value());
+
+            let old_sz = baseline_size.unwrap_or(0);
+            let new_sz = current_size.unwrap_or(0);
+
+            // Format sizes
+            let baseline_fmt = if let Some(sz) = baseline_size {
+                format_bytes(sz)
+            } else {
+                "—".to_string()
+            };
+            let current_fmt = if let Some(sz) = current_size {
+                format_bytes(sz)
+            } else {
+                "—".to_string()
+            };
+
+            // Change column
             let diff = new_sz as isize - old_sz as isize;
-            if diff > 0 {
-                format!("📈 +{}", format_bytes(diff as u64))
-            } else if diff < 0 {
-                format!("📉 -{}", format_bytes((-diff) as u64))
+            let change_str = if baseline_size.is_some() && current_size.is_some() {
+                if diff > 0 {
+                    format!("📈 +{}", format_bytes(diff as u64))
+                } else if diff < 0 {
+                    format!("📉 -{}", format_bytes((-diff) as u64))
+                } else {
+                    "➖ no change".to_owned()
+                }
+            } else if baseline_size.is_none() && current_size.is_some() {
+                "🆕 NEW".to_owned()
+            } else if baseline_size.is_some() && current_size.is_none() {
+                "🗑️ REMOVED".to_owned()
+            } else {
+                "—".to_owned()
+            };
+
+            md!(
+                "| `{}` | {} | {} | {} | {} |\n",
+                name,
+                crates_str,
+                baseline_fmt,
+                current_fmt,
+                change_str
+            );
+        }
+
+        // Summarize the symbols that are not in the detailed list
+        let mut baseline_sum_excluded: u64 = 0;
+        let mut current_sum_excluded: u64 = 0;
+        for sym in excluded_syms.iter() {
+            baseline_sum_excluded += sym.old.map(|s| s.total_size.value()).unwrap_or(0);
+            current_sum_excluded += sym.new.map(|s| s.total_size.value()).unwrap_or(0);
+        }
+
+        if !excluded_syms.is_empty() {
+            let diff_excluded = current_sum_excluded as isize - baseline_sum_excluded as isize;
+            let change_excluded_str = if diff_excluded > 0 {
+                format!("📈 +{}", format_bytes(diff_excluded as u64))
+            } else if diff_excluded < 0 {
+                format!("📉 -{}", format_bytes((-diff_excluded) as u64))
             } else {
                 "➖ no change".to_owned()
-            }
-        } else if baseline_size.is_none() && current_size.is_some() {
-            "🆕 NEW".to_owned()
-        } else if baseline_size.is_some() && current_size.is_none() {
-            "🗑️ REMOVED".to_owned()
+            };
+
+            md!(
+                "\n*{} additional symbols account for **{}** → **{}** ({})*\n",
+                excluded_syms.len(),
+                format_bytes(baseline_sum_excluded),
+                format_bytes(current_sum_excluded),
+                change_excluded_str
+            );
         } else {
-            "—".to_owned()
-        };
-        md!(
-            "| `{}` | {} | {} | {} |\n",
-            name,
-            baseline_fmt,
-            current_fmt,
-            change_str
-        );
+            md!("\n_All significant changes are listed above._\n");
+        }
+
+        md!("\n");
     }
     md!("\n");
+
+    // Number of LLVM IR lines
+    let current_llvm_lines = current.num_llvm_lines();
+    let baseline_llvm_lines = baseline.num_llvm_lines();
+
+    tx!(
+        "Number of LLVM lines: {}",
+        fmt_thousands(current_llvm_lines as isize).blue()
+    );
+    md!(
+        "Number of LLVM lines: {}",
+        fmt_thousands(current_llvm_lines as isize)
+    );
+    unitless_diff!(baseline_llvm_lines as isize, current_llvm_lines as isize);
+    tx!("\n");
+    md!("  \n");
+
+    // Relative crate size comparison
+    // Using the same strategy, we collect the top 20 crates (by total symbol size) for
+    // both baseline and current builds, and we show big changes.
+
+    // TODO: implement
 
     Ok(())
 }
