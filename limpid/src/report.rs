@@ -303,11 +303,11 @@ pub(crate) fn generate_reports(
     let excluded_syms: Vec<&ComparativeSymbol> =
         sorted_syms.iter().skip(TOP_N_SYMBOLS).copied().collect();
 
-    // If there are no size changes at all
+    // If there are any symbol size changes, render a detailed Markdown table
     if !detailed_syms.is_empty() {
-        // Render a Markdown table comparing symbol sizes between baseline and current.
-        md!("| Symbol | Crates | Baseline Size | Current Size | Change |\n");
-        md!("|--------|--------|---------------|--------------|--------|\n");
+        // Markdown table with explicit old/new/diff columns
+        md!("| Symbol | Baseline Size | Current Size | Change |\n");
+        md!("|--------|---------------|--------------|--------|\n");
 
         for sym in detailed_syms.iter() {
             let name = sym
@@ -316,45 +316,42 @@ pub(crate) fn generate_reports(
                 .or_else(|| sym.old.map(|s| s.name.as_str()))
                 .unwrap_or("<unknown>");
 
-            // Get crates from the current symbol, or fall back to baseline
-            let crates = sym
+            // Determine crates
+            let crates_opt = sym
                 .new
                 .map(|s| &s.crates)
                 .or_else(|| sym.old.map(|s| &s.crates));
 
-            let crates_str = if let Some(crates_set) = crates {
-                if crates_set.is_empty() {
-                    "—".to_string()
+            let crates_cell = if let Some(set) = crates_opt {
+                if set.is_empty() {
+                    String::new()
                 } else {
-                    crates_set
+                    let crates_fmt = set
                         .iter()
-                        .map(|c| c.as_str())
+                        .map(|c| format!("**{}**", c.as_str()))
                         .collect::<Vec<_>>()
-                        .join(", ")
+                        .join(", ");
+                    format!("<br> found in {}", crates_fmt)
                 }
             } else {
-                "—".to_string()
+                String::new()
             };
 
+            // Sizes
             let baseline_size = sym.old.map(|s| s.total_size.value());
             let current_size = sym.new.map(|s| s.total_size.value());
 
             let old_sz = baseline_size.unwrap_or(0);
             let new_sz = current_size.unwrap_or(0);
 
-            // Format sizes
-            let baseline_fmt = if let Some(sz) = baseline_size {
-                format_bytes(sz)
-            } else {
-                "—".to_string()
-            };
-            let current_fmt = if let Some(sz) = current_size {
-                format_bytes(sz)
-            } else {
-                "—".to_string()
-            };
+            let baseline_fmt = baseline_size
+                .map(format_bytes)
+                .unwrap_or_else(|| "—".to_string());
+            let current_fmt = current_size
+                .map(format_bytes)
+                .unwrap_or_else(|| "—".to_string());
 
-            // Change column
+            // Diff string (re-use existing emoji style)
             let diff = new_sz as isize - old_sz as isize;
             let change_str = if baseline_size.is_some() && current_size.is_some() {
                 if diff > 0 {
@@ -372,10 +369,11 @@ pub(crate) fn generate_reports(
                 "—".to_owned()
             };
 
+            // Final row
             md!(
-                "| `{}` | {} | {} | {} | {} |\n",
+                "| `{}`{} | {} | {} | {} |\n",
                 name,
-                crates_str,
+                crates_cell,
                 baseline_fmt,
                 current_fmt,
                 change_str
@@ -487,8 +485,9 @@ pub(crate) fn generate_reports(
     let excluded_fns: Vec<&ComparativeFn> = comparative_fns.iter().skip(20).collect();
 
     if !detailed_fns.is_empty() {
-        md!("| Function | Crates | Baseline Lines | Current Lines | Change |\n");
-        md!("|----------|--------|---------------|---------------|--------|\n");
+        // Markdown table with explicit old/new/diff columns
+        md!("| Function | Baseline Lines | Current Lines | Change |\n");
+        md!("|----------|---------------|--------------|--------|\n");
 
         for f in &detailed_fns {
             let name = f
@@ -498,22 +497,24 @@ pub(crate) fn generate_reports(
                 .unwrap_or("<unknown>");
 
             // Determine crates
-            let crates_set = f
+            let crates_opt = f
                 .new
                 .map(|v| &v.crates)
                 .or_else(|| f.old.map(|v| &v.crates));
 
-            let crates_str = if let Some(set) = crates_set {
+            let crates_cell = if let Some(set) = crates_opt {
                 if set.is_empty() {
-                    "—".to_string()
+                    String::new()
                 } else {
-                    set.iter()
-                        .map(|c| c.as_str())
+                    let crates_fmt = set
+                        .iter()
+                        .map(|c| format!("**{}**", c.as_str()))
                         .collect::<Vec<_>>()
-                        .join(", ")
+                        .join(", ");
+                    format!("<br> found in {}", crates_fmt)
                 }
             } else {
-                "—".to_string()
+                String::new()
             };
 
             let baseline_lines = f.old.map(|v| v.total_llvm_lines.value());
@@ -534,20 +535,23 @@ pub(crate) fn generate_reports(
                 if diff > 0 {
                     format!("📈 +{}", fmt_thousands(diff))
                 } else if diff < 0 {
-                    format!("📉 {}", fmt_thousands(diff))
+                    format!("📉 -{}", fmt_thousands((-diff) as isize))
                 } else {
                     "➖ no change".to_owned()
                 }
             } else if baseline_lines.is_none() && current_lines.is_some() {
                 "🆕 NEW".to_owned()
-            } else {
+            } else if baseline_lines.is_some() && current_lines.is_none() {
                 "🗑️ REMOVED".to_owned()
+            } else {
+                "—".to_owned()
             };
 
+            // Final row
             md!(
-                "| `{}` | {} | {} | {} | {} |\n",
+                "| `{}`{} | {} | {} | {} |\n",
                 name,
-                crates_str,
+                crates_cell,
                 baseline_fmt,
                 current_fmt,
                 change_str
@@ -569,7 +573,7 @@ pub(crate) fn generate_reports(
             let change_str = if diff > 0 {
                 format!("📈 +{}", fmt_thousands(diff))
             } else if diff < 0 {
-                format!("📉 {}", fmt_thousands(diff))
+                format!("📉 -{}", fmt_thousands((-diff) as isize))
             } else {
                 "➖ no change".to_string()
             };
