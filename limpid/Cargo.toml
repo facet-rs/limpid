@@ -9,8 +9,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0"
-substance = { path = "../../substance" }
-# substance = "0.4.0"
+# substance = { path = "../../substance" }
+substance = "0.6.0"
 # substance = { git = "https://github.com/fasterthanlime/substance.git", rev = "0f368db" }
 env_logger = "0.11"
 owo-colors = "4.0"

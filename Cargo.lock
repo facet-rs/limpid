@@ -769,7 +769,9 @@ dependencies = [
 
 [[package]]
 name = "substance"
-version = "0.5.0"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ec7b03ced2a0a2fa14f16b748f84eb290b2f7df6e860b0b8bd9a74181a62741"
 dependencies = [
  "aliri_braid",
  "binfarce",
