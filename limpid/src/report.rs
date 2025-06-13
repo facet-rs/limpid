@@ -254,8 +254,8 @@ pub(crate) fn generate_reports(
         .collect();
 
     // Pick the top symbols from both baseline and current, merge and dedup by name.
-    let top_current: Vec<&AggregateSymbol> = current_syms_sorted.iter().take(1000).collect();
-    let top_baseline: Vec<&AggregateSymbol> = baseline_syms_sorted.iter().take(1000).collect();
+    let top_current: Vec<&AggregateSymbol> = current_syms_sorted.iter().collect();
+    let top_baseline: Vec<&AggregateSymbol> = baseline_syms_sorted.iter().collect();
 
     struct ComparativeSymbol<'a> {
         old: Option<&'a AggregateSymbol>,
