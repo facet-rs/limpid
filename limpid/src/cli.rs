@@ -62,11 +62,6 @@ impl CliConfig {
 
         env_logger::init();
     }
-
-    /// Check if we're in markdown mode
-    pub fn is_markdown_mode(&self) -> bool {
-        self.markdown_output.is_some()
-    }
 }
 
 /// Print help message

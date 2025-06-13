@@ -24,7 +24,7 @@ pub fn run_command(cmd: &mut Command) -> Result<Output> {
     let output = cmd
         .output()
         .with_context(|| format!("Failed to execute command: {}", full_command))?;
-    
+
     Ok(output)
 }
 
@@ -75,10 +75,7 @@ pub fn create_worktree(
 }
 
 /// Remove a git worktree
-pub fn remove_worktree(
-    repo_path: &Utf8PathBuf,
-    worktree_path: &Utf8PathBuf,
-) -> Result<()> {
+pub fn remove_worktree(repo_path: &Utf8PathBuf, worktree_path: &Utf8PathBuf) -> Result<()> {
     println!("🧹 Removing worktree at {}", worktree_path);
 
     // Remove the worktree directory
@@ -180,25 +177,6 @@ pub fn find_git_root(start_path: &Utf8Path) -> Result<Utf8PathBuf> {
     let path = std::str::from_utf8(&output.stdout)
         .context("Invalid UTF-8 in git output")?
         .trim();
-    
-    Ok(Utf8PathBuf::from(path))
-}
 
-/// Get the current commit hash
-pub fn get_current_commit(repo_path: &Utf8Path) -> Result<String> {
-    let mut cmd = Command::new("git");
-    cmd.args(["rev-parse", "HEAD"]).current_dir(repo_path);
-    
-    let output = run_command(&mut cmd)?;
-    
-    ensure!(
-        output.status.success(),
-        "Failed to get current commit: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    
-    Ok(std::str::from_utf8(&output.stdout)
-        .context("Invalid UTF-8 in git output")?
-        .trim()
-        .to_string())
+    Ok(Utf8PathBuf::from(path))
 }
