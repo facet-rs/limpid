@@ -1,7 +1,8 @@
 use itertools::Itertools;
 use owo_colors::OwoColorize;
+use std::collections::BTreeMap;
 use std::{cmp, fmt::Write};
-use substance::{AggregateSymbol, BuildContext};
+use substance::{AggregateLlvmFunction, AggregateSymbol, BuildContext, ByteSize, CrateName};
 
 /// Generate a text (with colors) and a markdown report comparing two builds
 pub(crate) fn generate_reports(
@@ -69,12 +70,6 @@ pub(crate) fn generate_reports(
     tx!("{}", "limpid text report\n".bright_blue());
     md!("# limpid markdown report\n\n");
 
-    // ── General statistics ────────────────────────────────────────────────────
-    tx!("====================================\n");
-    tx!("📊 General statistics\n");
-    tx!("====================================\n\n");
-    md!("## General statistics\n\n");
-
     // Number of crates
     let current_num_crates = current.crates.len();
     let baseline_num_crates = baseline.crates.len();
@@ -84,6 +79,145 @@ pub(crate) fn generate_reports(
     unitless_diff!(baseline_num_crates as isize, current_num_crates as isize);
     tx!("\n");
     md!("  \n");
+
+    struct CrateWithSize {
+        name: CrateName,
+        size: ByteSize,
+    }
+
+    let current_crates = current
+        .crates
+        .iter()
+        .map(|krate| CrateWithSize {
+            name: krate.name.clone(),
+            size: krate.symbols.values().map(|s| s.size).sum::<ByteSize>(),
+        })
+        .collect::<Vec<_>>();
+    let baseline_crates = baseline
+        .crates
+        .iter()
+        .map(|krate| CrateWithSize {
+            name: krate.name.clone(),
+            size: krate.symbols.values().map(|s| s.size).sum::<ByteSize>(),
+        })
+        .collect::<Vec<_>>();
+
+    // ── Per-crate size changes ────────────────────────────────────────────────
+
+    // Build lookup maps from crate name → size
+    let mut current_crate_map: BTreeMap<&str, ByteSize> = BTreeMap::new();
+    for c in &current_crates {
+        current_crate_map.insert(c.name.as_str(), c.size);
+    }
+    let mut baseline_crate_map: BTreeMap<&str, ByteSize> = BTreeMap::new();
+    for c in &baseline_crates {
+        baseline_crate_map.insert(c.name.as_str(), c.size);
+    }
+
+    // Collect all crate names
+    let mut crate_names: BTreeSet<&str> = BTreeSet::new();
+    crate_names.extend(current_crate_map.keys().copied());
+    crate_names.extend(baseline_crate_map.keys().copied());
+
+    // Build a comparative list
+    struct ComparativeCrate<'a> {
+        name: &'a str,
+        old: Option<ByteSize>,
+        new: Option<ByteSize>,
+        diff: isize,
+    }
+
+    let mut comparative_crates: Vec<ComparativeCrate> = crate_names
+        .iter()
+        .map(|&name| {
+            let old = baseline_crate_map.get(name).copied();
+            let new = current_crate_map.get(name).copied();
+            let old_bytes = old.map(|b| b.value()).unwrap_or(0);
+            let new_bytes = new.map(|b| b.value()).unwrap_or(0);
+            ComparativeCrate {
+                name,
+                old,
+                new,
+                diff: new_bytes as isize - old_bytes as isize,
+            }
+        })
+        .filter(|c| c.diff != 0) // keep only crates with changes
+        .collect();
+
+    // Sort by absolute byte difference (largest first)
+    comparative_crates.sort_by_key(|c| cmp::Reverse(c.diff.abs() as u64));
+
+    // Split into detailed (top 10) and excluded crates
+    let detailed_crates: Vec<&ComparativeCrate> = comparative_crates.iter().take(10).collect();
+    let excluded_crates: Vec<&ComparativeCrate> = comparative_crates.iter().skip(10).collect();
+
+    if !detailed_crates.is_empty() {
+        md!("| Crate | Baseline Size | Current Size | Change |\n");
+        md!("|-------|---------------|--------------|--------|\n");
+
+        for c in &detailed_crates {
+            let baseline_fmt = c
+                .old
+                .map(|sz| format_bytes(sz.value()))
+                .unwrap_or_else(|| "—".to_string());
+            let current_fmt = c
+                .new
+                .map(|sz| format_bytes(sz.value()))
+                .unwrap_or_else(|| "—".to_string());
+
+            let change_str = if c.old.is_some() && c.new.is_some() {
+                if c.diff > 0 {
+                    format!("📈 +{}", format_bytes(c.diff as u64))
+                } else {
+                    format!("📉 -{}", format_bytes((-c.diff) as u64))
+                }
+            } else if c.old.is_none() && c.new.is_some() {
+                "🆕 NEW".to_owned()
+            } else {
+                "🗑️ REMOVED".to_owned()
+            };
+
+            md!(
+                "| `{}` | {} | {} | {} |\n",
+                c.name,
+                baseline_fmt,
+                current_fmt,
+                change_str
+            );
+        }
+
+        // Summarize excluded crates (those beyond the top list)
+        if !excluded_crates.is_empty() {
+            let baseline_sum: u64 = excluded_crates
+                .iter()
+                .map(|c| c.old.map(|s| s.value()).unwrap_or(0))
+                .sum();
+            let current_sum: u64 = excluded_crates
+                .iter()
+                .map(|c| c.new.map(|s| s.value()).unwrap_or(0))
+                .sum();
+            let diff = current_sum as isize - baseline_sum as isize;
+            let change_str = if diff > 0 {
+                format!("📈 +{}", format_bytes(diff as u64))
+            } else if diff < 0 {
+                format!("📉 -{}", format_bytes((-diff) as u64))
+            } else {
+                "➖ no change".to_owned()
+            };
+
+            md!(
+                "\n*{} additional crates account for **{}** → **{}** ({})*\n",
+                excluded_crates.len(),
+                format_bytes(baseline_sum),
+                format_bytes(current_sum),
+                change_str
+            );
+        } else {
+            md!("\n_All significant changes are listed above._\n");
+        }
+
+        md!("\n");
+    }
 
     // Number of symbols and .text section size on a single line
     let current_num_symbols = current.deps_symbols.len();
@@ -178,12 +312,8 @@ pub(crate) fn generate_reports(
         });
 
     // If there are no size changes at all
-    if detailed_syms.is_empty() {
-        tx!("{}", "No symbol size changes detected.\n".yellow());
-        md!("No symbol size changes detected.\n\n");
-    } else {
+    if !detailed_syms.is_empty() {
         // Render a Markdown table comparing symbol sizes between baseline and current.
-        md!("\n## Top Symbol Size Changes (by absolute byte diff)\n\n");
         md!("| Symbol | Crates | Baseline Size | Current Size | Change |\n");
         md!("|--------|--------|---------------|--------------|--------|\n");
 
@@ -309,11 +439,155 @@ pub(crate) fn generate_reports(
     tx!("\n");
     md!("  \n");
 
-    // Relative crate size comparison
-    // Using the same strategy, we collect the top 20 crates (by total symbol size) for
-    // both baseline and current builds, and we show big changes.
+    // ── Per-function LLVM IR line changes ─────────────────────────────────────
 
-    // TODO: implement
+    // Gather aggregate LLVM function information for both builds
+    let current_fn_map = current.all_llvm_functions();
+    let baseline_fn_map = baseline.all_llvm_functions();
+
+    // Merge keys (function names) from both maps
+    let mut fn_names: BTreeSet<&str> = BTreeSet::new();
+    for name in current_fn_map.keys() {
+        fn_names.insert(name.as_str());
+    }
+    for name in baseline_fn_map.keys() {
+        fn_names.insert(name.as_str());
+    }
+
+    // Build a list of comparative functions, keeping only those with changes
+    struct ComparativeFn<'a> {
+        old: Option<&'a AggregateLlvmFunction>,
+        new: Option<&'a AggregateLlvmFunction>,
+        line_diff: isize,
+    }
+
+    let mut comparative_fns: Vec<ComparativeFn> = fn_names
+        .iter()
+        .map(|&name| {
+            let old = baseline_fn_map.get(name);
+            let new = current_fn_map.get(name);
+
+            let old_lines = old.map(|f| f.total_llvm_lines.value()).unwrap_or(0);
+            let new_lines = new.map(|f| f.total_llvm_lines.value()).unwrap_or(0);
+            let line_diff = new_lines as isize - old_lines as isize;
+
+            ComparativeFn {
+                old,
+                new,
+                line_diff,
+            }
+        })
+        .filter(|f| f.line_diff != 0)
+        .collect();
+
+    // Sort by absolute line difference (largest first)
+    comparative_fns.sort_by_key(|f| cmp::Reverse(f.line_diff.abs() as u64));
+
+    // Split into detailed (top 20) and excluded
+    let detailed_fns: Vec<&ComparativeFn> = comparative_fns.iter().take(20).collect();
+    let excluded_fns: Vec<&ComparativeFn> = comparative_fns.iter().skip(20).collect();
+
+    if !detailed_fns.is_empty() {
+        md!("| Function | Crates | Baseline Lines | Current Lines | Change |\n");
+        md!("|----------|--------|---------------|---------------|--------|\n");
+
+        for f in &detailed_fns {
+            let name = f
+                .new
+                .map(|v| v.name.as_str())
+                .or_else(|| f.old.map(|v| v.name.as_str()))
+                .unwrap_or("<unknown>");
+
+            // Determine crates
+            let crates_set = f
+                .new
+                .map(|v| &v.crates)
+                .or_else(|| f.old.map(|v| &v.crates));
+
+            let crates_str = if let Some(set) = crates_set {
+                if set.is_empty() {
+                    "—".to_string()
+                } else {
+                    set.iter()
+                        .map(|c| c.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
+            } else {
+                "—".to_string()
+            };
+
+            let baseline_lines = f.old.map(|v| v.total_llvm_lines.value());
+            let current_lines = f.new.map(|v| v.total_llvm_lines.value());
+
+            let old_ln = baseline_lines.unwrap_or(0);
+            let new_ln = current_lines.unwrap_or(0);
+
+            let baseline_fmt = baseline_lines
+                .map(|ln| fmt_thousands(ln as isize))
+                .unwrap_or_else(|| "—".to_string());
+            let current_fmt = current_lines
+                .map(|ln| fmt_thousands(ln as isize))
+                .unwrap_or_else(|| "—".to_string());
+
+            let diff = new_ln as isize - old_ln as isize;
+            let change_str = if baseline_lines.is_some() && current_lines.is_some() {
+                if diff > 0 {
+                    format!("📈 +{}", fmt_thousands(diff))
+                } else if diff < 0 {
+                    format!("📉 {}", fmt_thousands(diff))
+                } else {
+                    "➖ no change".to_owned()
+                }
+            } else if baseline_lines.is_none() && current_lines.is_some() {
+                "🆕 NEW".to_owned()
+            } else {
+                "🗑️ REMOVED".to_owned()
+            };
+
+            md!(
+                "| `{}` | {} | {} | {} | {} |\n",
+                name,
+                crates_str,
+                baseline_fmt,
+                current_fmt,
+                change_str
+            );
+        }
+
+        // Summarize excluded functions
+        if !excluded_fns.is_empty() {
+            let baseline_sum: usize = excluded_fns
+                .iter()
+                .map(|f| f.old.map(|v| v.total_llvm_lines.value()).unwrap_or(0))
+                .sum();
+            let current_sum: usize = excluded_fns
+                .iter()
+                .map(|f| f.new.map(|v| v.total_llvm_lines.value()).unwrap_or(0))
+                .sum();
+
+            let diff = current_sum as isize - baseline_sum as isize;
+            let change_str = if diff > 0 {
+                format!("📈 +{}", fmt_thousands(diff))
+            } else if diff < 0 {
+                format!("📉 {}", fmt_thousands(diff))
+            } else {
+                "➖ no change".to_string()
+            };
+
+            md!(
+                "\n*{} additional functions account for **{}** → **{}** ({})*\n",
+                excluded_fns.len(),
+                fmt_thousands(baseline_sum as isize),
+                fmt_thousands(current_sum as isize),
+                change_str
+            );
+        } else {
+            md!("\n_All significant changes are listed above._\n");
+        }
+
+        md!("\n");
+    }
 
     Ok(())
 }
