@@ -67,8 +67,8 @@ pub(crate) fn generate_reports(
         }};
     }
 
-    tx!("{}", "limpid text report\n".bright_blue());
-    md!("# limpid markdown report\n\n");
+    tx!("{}", "limpid report\n".bright_blue());
+    md!("# 📦 limpid report\n\n");
 
     // Number of crates
     let current_num_crates = current.crates.len();
