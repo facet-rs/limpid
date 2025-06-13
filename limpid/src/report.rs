@@ -445,6 +445,13 @@ pub(crate) fn generate_reports(
     let current_fn_map = current.all_llvm_functions();
     let baseline_fn_map = baseline.all_llvm_functions();
 
+    // Remove any functions that start with `autocfg_` from both builds' function maps
+    let autocfg_predicate = |name: &str| name.starts_with("autocfg_");
+    let mut current_fn_map = current_fn_map;
+    let mut baseline_fn_map = baseline_fn_map;
+    current_fn_map.retain(|name, _| !autocfg_predicate(name.as_str()));
+    baseline_fn_map.retain(|name, _| !autocfg_predicate(name.as_str()));
+
     // Merge keys (function names) from both maps
     let mut fn_names: BTreeSet<&str> = BTreeSet::new();
     for name in current_fn_map.keys() {
