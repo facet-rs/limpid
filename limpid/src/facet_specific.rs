@@ -16,9 +16,9 @@ pub fn find_facet_workspace(limpid_root: &Utf8Path) -> Result<Utf8PathBuf> {
     let workspace_root = limpid_root
         .parent()
         .ok_or_else(|| anyhow!("Could not find parent of limpid repository"))?;
-    
+
     let facet_root = workspace_root.join("facet");
-    
+
     if facet_root.exists() && facet_root.join(".git").exists() {
         Ok(facet_root)
     } else {
@@ -35,20 +35,20 @@ pub fn find_facet_workspace(limpid_root: &Utf8Path) -> Result<Utf8PathBuf> {
 /// Verify that the kitchensink structure exists and is valid
 pub fn verify_kitchensink_structure(limpid_root: &Utf8Path) -> Result<Utf8PathBuf> {
     let kitchensink_dir = limpid_root.join(KITCHENSINK_PATH);
-    
+
     if !kitchensink_dir.exists() {
         return Err(anyhow!(
             "Kitchensink directory not found at: {}",
             kitchensink_dir.red()
         ));
     }
-    
+
     println!(
         "{} {}",
         "✅ Found kitchensink:".bright_black(),
         kitchensink_dir.green()
     );
-    
+
     let ks_facet_manifest = kitchensink_dir.join(KS_FACET_MANIFEST);
     if !ks_facet_manifest.exists() {
         return Err(anyhow!(
@@ -56,17 +56,12 @@ pub fn verify_kitchensink_structure(limpid_root: &Utf8Path) -> Result<Utf8PathBu
             ks_facet_manifest.red()
         ));
     }
-    
+
     println!(
         "{} {}",
         "✅ Found ks-facet manifest:".bright_black(),
         ks_facet_manifest.green()
     );
-    
-    Ok(ks_facet_manifest)
-}
 
-/// Get the path to ks-facet manifest from a worktree
-pub fn get_ks_facet_manifest_in_worktree(worktree_path: &Utf8Path) -> Utf8PathBuf {
-    worktree_path.join(KITCHENSINK_PATH).join(KS_FACET_MANIFEST)
+    Ok(ks_facet_manifest)
 }

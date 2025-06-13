@@ -9,10 +9,12 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0"
-substance = { path = "../../substance", features = ["formatting", "markdown", "cli"] }
+# substance = { path = "../../substance" }
 # substance = "0.4.0"
-camino = "1.1"
+substance = { git = "https://github.com/fasterthanlime/substance.git", rev = "0f368db" }
 env_logger = "0.11"
 owo-colors = "4.0"
 indicatif = "0.17"
 tempfile = "3.8"
+camino = "1.1.10"
+pico-args = "0.5.0"

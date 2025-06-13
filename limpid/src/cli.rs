@@ -1,13 +1,12 @@
-//! Command-line interface handling
-
 use anyhow::{anyhow, Result};
-use std::path::PathBuf;
+use camino::Utf8PathBuf;
+use pico_args::Arguments;
 
 /// CLI configuration parsed from command-line arguments
 #[derive(Debug, Clone)]
 pub struct CliConfig {
     /// Generate markdown report to file
-    pub markdown_output: Option<PathBuf>,
+    pub markdown_output: Option<Utf8PathBuf>,
     /// Enable verbose logging
     pub verbose: bool,
 }
@@ -15,48 +14,44 @@ pub struct CliConfig {
 impl CliConfig {
     /// Parse command-line arguments
     pub fn from_args() -> Result<Self> {
-        let args: Vec<String> = std::env::args().collect();
-        
-        let mut markdown_output = None;
-        let mut verbose = false;
-        
-        let mut i = 1;
-        while i < args.len() {
-            match args[i].as_str() {
-                "--markdown" | "-m" => {
-                    // Check if next argument is a path
-                    if i + 1 < args.len() && !args[i + 1].starts_with('-') {
-                        markdown_output = Some(PathBuf::from(&args[i + 1]));
-                        i += 1;
-                    } else {
-                        return Err(anyhow!(
-                            "--markdown flag requires a file path argument\nUsage: {} --markdown <output-file>",
-                            args[0]
-                        ));
-                    }
-                    i += 1;
-                }
-                "--verbose" | "-v" => {
-                    verbose = true;
-                    i += 1;
-                }
-                "--help" | "-h" => {
-                    print_help(&args[0]);
-                    std::process::exit(0);
-                }
-                arg if arg.starts_with('-') => {
-                    return Err(anyhow!("Unknown argument: {}", arg));
-                }
-                _ => i += 1,
-            }
+        let mut pargs = Arguments::from_env();
+
+        if pargs.contains(["-h", "--help"]) {
+            // pico-args does not have a prog_name() method, so use std::env::args()
+            let program_name = std::env::args()
+                .next()
+                .unwrap_or_else(|| "prog".to_string());
+            print_help(&program_name);
+            std::process::exit(0);
         }
-        
+
+        let markdown_output: Option<Utf8PathBuf> =
+            pargs.opt_value_from_os_str(["-m", "--markdown"], |s| {
+                s.to_str()
+                    .ok_or_else(|| anyhow!("Non-UTF8 path for markdown"))
+                    .map(Utf8PathBuf::from)
+            })?;
+
+        let verbose = pargs.contains(["-v", "--verbose"]);
+
+        // Any argument left means an unrecognized argument.
+        let rest = pargs.finish();
+        if !rest.is_empty() {
+            return Err(anyhow!(
+                "Unknown argument(s): {}",
+                rest.iter()
+                    .map(|a| a.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+        }
+
         Ok(Self {
             markdown_output,
             verbose,
         })
     }
-    
+
     /// Initialize logging based on verbose flag
     pub fn init_logging(&self) {
         if self.verbose {
@@ -64,10 +59,10 @@ impl CliConfig {
         } else if std::env::var("RUST_LOG").is_err() {
             std::env::set_var("RUST_LOG", "info");
         }
-        
+
         env_logger::init();
     }
-    
+
     /// Check if we're in markdown mode
     pub fn is_markdown_mode(&self) -> bool {
         self.markdown_output.is_some()
