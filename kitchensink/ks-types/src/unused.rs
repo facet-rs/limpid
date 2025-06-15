@@ -1,83 +1,81 @@
-pub use chrono::{self, NaiveDate, NaiveDateTime};
-pub use uuid::{self, Uuid};
+use chrono::{self, NaiveDate, NaiveDateTime};
+use uuid::{self, Uuid};
 
 #[cfg(feature = "facet")]
 use facet::Facet;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-pub mod unused;
-
-/// The root struct representing the catalog of everything.
+/// The root struct representing the inventory of everything.
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct Catalog {
+pub struct Inventory {
     pub id: Uuid,
-    pub businesses: Vec<Business>,
+    pub companies: Vec<Company>,
     pub created_at: NaiveDateTime,
-    pub metadata: CatalogMetadata,
+    pub metadata: InventoryMetadata,
 }
 
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct CatalogMetadata {
+pub struct InventoryMetadata {
     pub version: String,
     pub region: String,
 }
 
-/// A business represented in the catalog.
+/// A company represented in the inventory.
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct Business {
+pub struct Company {
     pub id: Uuid,
     pub name: String,
-    pub address: Address,
-    pub owner: BusinessOwner,
-    pub users: Vec<BusinessUser>,
-    pub branches: Vec<Branch>,
-    pub products: Vec<Product>,
+    pub address: Location,
+    pub proprietor: CompanyProprietor,
+    pub members: Vec<CompanyMember>,
+    pub offices: Vec<Office>,
+    pub goods: Vec<Item>,
     pub created_at: NaiveDateTime,
 }
 
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct BusinessOwner {
-    pub user: User,
+pub struct CompanyProprietor {
+    pub person: Person,
     pub ownership_percent: f32,
 }
 
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct Branch {
+pub struct Office {
     pub id: Uuid,
     pub name: String,
-    pub address: Address,
-    pub employees: Vec<BusinessUser>,
-    pub inventory: Vec<BranchInventory>,
+    pub address: Location,
+    pub staff: Vec<CompanyMember>,
+    pub stock: Vec<OfficeStock>,
     pub open: bool,
 }
 
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct BranchInventory {
-    pub product: Product,
-    pub stock: u32,
+pub struct OfficeStock {
+    pub item: Item,
+    pub quantity: u32,
     pub location_code: Option<String>,
 }
 
-/// A user of the business
+/// A member of the company
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct BusinessUser {
-    pub user: User,
-    pub roles: Vec<Role>,
+pub struct CompanyMember {
+    pub person: Person,
+    pub roles: Vec<Position>,
     pub is_active: bool,
     pub created_at: NaiveDateTime,
 }
@@ -85,45 +83,45 @@ pub struct BusinessUser {
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct User {
+pub struct Person {
     pub id: Uuid,
     pub username: String,
     pub email: String,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
-    pub profile: UserProfile,
-    pub settings: Settings,
+    pub profile: PersonProfile,
+    pub preferences: Preferences,
 }
 
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct UserProfile {
+pub struct PersonProfile {
     pub first_name: String,
     pub last_name: String,
     pub date_of_birth: NaiveDate,
-    pub gender: Gender,
+    pub gender: Sex,
     pub bio: Option<String>,
     pub avatar_url: Option<String>,
-    pub home_address: Address,
+    pub home_address: Location,
 }
 
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct Address {
+pub struct Location {
     pub street: String,
     pub city: String,
     pub state: String,
     pub postal_code: String,
     pub country: String,
-    pub geo: Option<GeoLocation>,
+    pub geo: Option<Coordinates>,
 }
 
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct GeoLocation {
+pub struct Coordinates {
     pub latitude: f64,
     pub longitude: f64,
 }
@@ -132,7 +130,7 @@ pub struct GeoLocation {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 #[repr(u8)]
-pub enum Gender {
+pub enum Sex {
     Male,
     Female,
     Other,
@@ -142,32 +140,32 @@ pub enum Gender {
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct Product {
+pub struct Item {
     pub id: Uuid,
     pub name: String,
     pub description: Option<String>,
     pub price_cents: u64,
     pub currency: String,
     pub available: bool,
-    pub metadata: Option<ProductMetadata>,
-    pub reviews: Vec<ProductReview>,
-    pub categories: Vec<Category>,
+    pub metadata: Option<ItemMetadata>,
+    pub reviews: Vec<ItemReview>,
+    pub categories: Vec<Group>,
 }
 
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct ProductMetadata {
+pub struct ItemMetadata {
     pub sku: Option<String>,
     pub categories: Vec<String>,
     pub weight_grams: Option<u32>,
-    pub dimensions: Option<ProductDimensions>,
+    pub dimensions: Option<ItemDimensions>,
 }
 
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct ProductDimensions {
+pub struct ItemDimensions {
     pub length_mm: Option<f32>,
     pub width_mm: Option<f32>,
     pub height_mm: Option<f32>,
@@ -176,9 +174,9 @@ pub struct ProductDimensions {
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct ProductReview {
+pub struct ItemReview {
     pub id: Uuid,
-    pub reviewer: UserSummary,
+    pub reviewer: PersonSummary,
     pub rating: u8,
     pub text: Option<String>,
     pub created_at: NaiveDateTime,
@@ -187,18 +185,18 @@ pub struct ProductReview {
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct Category {
+pub struct Group {
     pub id: Uuid,
     pub name: String,
     pub description: Option<String>,
-    pub parent: Option<Box<Category>>,
+    pub parent: Option<Box<Group>>,
 }
 
-/// Brief user reference (for lists)
+/// Brief person reference (for lists)
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct UserSummary {
+pub struct PersonSummary {
     pub id: Uuid,
     pub username: String,
     pub avatar_url: Option<String>,
@@ -207,17 +205,17 @@ pub struct UserSummary {
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct Role {
+pub struct Position {
     pub id: Uuid,
     pub name: String,
     pub description: Option<String>,
-    pub permissions: Vec<Permission>,
+    pub permissions: Vec<Right>,
 }
 
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct Permission {
+pub struct Right {
     pub id: Uuid,
     pub name: String,
     pub description: Option<String>,
@@ -226,11 +224,11 @@ pub struct Permission {
 #[cfg_attr(feature = "facet", derive(Facet))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
-pub struct Settings {
-    pub user_id: Uuid,
+pub struct Preferences {
+    pub person_id: Uuid,
     pub email_notifications: bool,
     pub push_notifications: bool,
-    pub theme: Theme,
+    pub theme: Style,
     pub language: String,
 }
 
@@ -238,7 +236,7 @@ pub struct Settings {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug)]
 #[repr(u8)]
-pub enum Theme {
+pub enum Style {
     Light,
     Dark,
     System,

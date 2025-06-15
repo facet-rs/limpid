@@ -57,6 +57,7 @@ pub fn create_worktree(
     cmd.args([
         "worktree",
         "add",
+        "--force",
         "--detach",
         worktree_path.as_str(),
         branch,

@@ -592,6 +592,41 @@ pub(crate) fn generate_reports(
         md!("\n");
     }
 
+    // Compare total build time (wall_duration)
+    let baseline_secs = baseline.wall_duration.as_secs_f64();
+    let current_secs = current.wall_duration.as_secs_f64();
+
+    fn fmt_duration(secs: f64) -> String {
+        if secs < 60.0 {
+            format!("{:.2} s", secs)
+        } else if secs < 3600.0 {
+            let m = (secs / 60.0).floor();
+            let s = secs % 60.0;
+            format!("{:.0}m {:.1}s", m, s)
+        } else {
+            let h = (secs / 3600.0).floor();
+            let m = ((secs % 3600.0) / 60.0).floor();
+            let s = secs % 60.0;
+            format!("{:.0}h {:.0}m {:.0}s", h, m, s)
+        }
+    }
+
+    tx!("Wall duration: {}", fmt_duration(current_secs).magenta());
+    md!("Wall duration: {}", fmt_duration(current_secs));
+    let diff = current_secs - baseline_secs;
+    if diff > 0.01 {
+        tx!("{}", format!(" (📈 +{:.2} s)", diff).green());
+        md!(" (📈 +{:.2} s)", diff);
+    } else if diff < -0.01 {
+        tx!("{}", format!(" (📉 {:.2} s)", diff).red());
+        md!(" (📉 {:.2} s)", diff);
+    } else {
+        tx!("{}", " (➖ no change)".dimmed());
+        md!(" (➖ no change)");
+    }
+    tx!("\n");
+    md!("  \n");
+
     Ok(())
 }
 
