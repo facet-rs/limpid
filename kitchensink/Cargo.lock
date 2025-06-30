@@ -89,7 +89,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "facet"
-version = "0.27.12"
+version = "0.27.15"
 dependencies = [
  "facet-core",
  "facet-macros",
@@ -98,7 +98,7 @@ dependencies = [
 
 [[package]]
 name = "facet-core"
-version = "0.27.12"
+version = "0.27.15"
 dependencies = [
  "bitflags",
  "chrono",
@@ -108,7 +108,7 @@ dependencies = [
 
 [[package]]
 name = "facet-deserialize"
-version = "0.24.18"
+version = "0.24.21"
 dependencies = [
  "ariadne",
  "facet-core",
@@ -119,7 +119,7 @@ dependencies = [
 
 [[package]]
 name = "facet-json"
-version = "0.24.13"
+version = "0.24.16"
 dependencies = [
  "facet-core",
  "facet-deserialize",
@@ -132,7 +132,7 @@ dependencies = [
 
 [[package]]
 name = "facet-macros"
-version = "0.27.12"
+version = "0.27.15"
 dependencies = [
  "facet-core",
  "facet-macros-emit",
@@ -140,7 +140,7 @@ dependencies = [
 
 [[package]]
 name = "facet-macros-emit"
-version = "0.27.12"
+version = "0.27.15"
 dependencies = [
  "facet-macros-parse",
  "quote",
@@ -148,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "facet-macros-parse"
-version = "0.27.12"
+version = "0.27.15"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -157,7 +157,7 @@ dependencies = [
 
 [[package]]
 name = "facet-pretty"
-version = "0.23.19"
+version = "0.23.22"
 dependencies = [
  "facet-core",
  "facet-reflect",
@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "facet-reflect"
-version = "0.27.12"
+version = "0.27.15"
 dependencies = [
  "bitflags",
  "facet-core",
@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "facet-serialize"
-version = "0.24.13"
+version = "0.24.16"
 dependencies = [
  "facet-core",
  "facet-reflect",

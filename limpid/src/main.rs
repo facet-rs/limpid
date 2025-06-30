@@ -105,7 +105,6 @@ fn perform_comparison_analysis(
 
 /// Build and analyze a manifest
 fn build_and_analyze(manifest_path: &Utf8Path) -> Result<BuildContext> {
-    // Create build runner with unique target directory
     let runner = BuildRunner::for_manifest(manifest_path)
         .arg("--bin")
         .arg("ks-facet")
@@ -113,7 +112,6 @@ fn build_and_analyze(manifest_path: &Utf8Path) -> Result<BuildContext> {
 
     println!("📦 Building {}...", manifest_path.parent().unwrap());
 
-    // Run the build
     let context = runner
         .run()
         .map_err(|e| anyhow::anyhow!("Build failed: {:?}", e))?;

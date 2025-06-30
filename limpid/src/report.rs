@@ -145,7 +145,7 @@ pub(crate) fn generate_reports(
         .collect();
 
     // Sort by absolute byte difference (largest first)
-    comparative_crates.sort_by_key(|c| cmp::Reverse(c.diff.abs() as u64));
+    comparative_crates.sort_by_key(|c| cmp::Reverse(c.diff.unsigned_abs() as u64));
 
     // Split into detailed (top 10) and excluded crates
     let detailed_crates: Vec<&ComparativeCrate> = comparative_crates.iter().take(10).collect();
@@ -293,7 +293,7 @@ pub(crate) fn generate_reports(
         .iter()
         .filter(|sym| sym.size_diff != 0) // ignore symbols with no change
         .collect();
-    sorted_syms.sort_by_key(|sym| cmp::Reverse(sym.size_diff.abs() as u64));
+    sorted_syms.sort_by_key(|sym| cmp::Reverse(sym.size_diff.unsigned_abs() as u64));
 
     // Take at most the top N entries for the detailed list and partition the rest
     const TOP_N_SYMBOLS: usize = 20;
@@ -478,7 +478,7 @@ pub(crate) fn generate_reports(
         .collect();
 
     // Sort by absolute line difference (largest first)
-    comparative_fns.sort_by_key(|f| cmp::Reverse(f.line_diff.abs() as u64));
+    comparative_fns.sort_by_key(|f| cmp::Reverse(f.line_diff.unsigned_abs() as u64));
 
     // Split into detailed (top 20) and excluded
     let detailed_fns: Vec<&ComparativeFn> = comparative_fns.iter().take(20).collect();
@@ -535,7 +535,7 @@ pub(crate) fn generate_reports(
                 if diff > 0 {
                     format!("📈 +{}", fmt_thousands(diff))
                 } else if diff < 0 {
-                    format!("📉 -{}", fmt_thousands((-diff) as isize))
+                    format!("📉 -{}", fmt_thousands(-diff))
                 } else {
                     "➖ no change".to_owned()
                 }
@@ -573,7 +573,7 @@ pub(crate) fn generate_reports(
             let change_str = if diff > 0 {
                 format!("📈 +{}", fmt_thousands(diff))
             } else if diff < 0 {
-                format!("📉 -{}", fmt_thousands((-diff) as isize))
+                format!("📉 -{}", fmt_thousands(-diff))
             } else {
                 "➖ no change".to_string()
             };
